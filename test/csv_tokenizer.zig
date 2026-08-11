@@ -8,18 +8,15 @@ const testing = std.testing;
 const expect = testing.expect;
 const csv_mod = @import("csv");
 
-var default_buffer = [_]u8{0} ** 1024;
-
-fn getTokenizer(file: std.fs.File, buffer: []u8, config: csv_mod.CsvConfig) !csv_mod.CsvTokenizer(std.fs.File.Reader) {
-    const reader = file.reader();
-    const csv = try csv_mod.CsvTokenizer(std.fs.File.Reader).init(reader, buffer, config);
+fn getTokenizer(reader: *std.Io.Reader, buffer: []u8, config: csv_mod.CsvConfig) !csv_mod.CsvTokenizer {
+    const csv = try csv_mod.CsvTokenizer.init(reader, buffer, config);
     return csv;
 }
 
 fn expectToken(comptime expected: csv_mod.CsvToken, maybe_actual: ?csv_mod.CsvToken) !void {
     if (maybe_actual) |actual| {
         if (@intFromEnum(expected) != @intFromEnum(actual)) {
-            std.log.warn("Expected {?} but is {?}\n", .{ expected, actual });
+            std.log.warn("Expected {t} but is {t}\n", .{ expected, actual });
             return error.TestFailed;
         }
 
@@ -30,22 +27,24 @@ fn expectToken(comptime expected: csv_mod.CsvToken, maybe_actual: ?csv_mod.CsvTo
             else => {},
         }
     } else {
-        std.log.warn("Expected {?} but is {?}\n", .{ expected, maybe_actual });
+        std.log.warn("Expected {t} but is {?t}\n", .{ expected, maybe_actual });
         return error.TestFailed;
     }
 }
 
 test "Create iterator for file reader" {
-    const file = try std.fs.cwd().openFile("test/resources/test-1.csv", .{});
-    defer file.close();
+    const data = @embedFile("resources/test-1.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [1024]u8 = undefined;
 
-    _ = try getTokenizer(file, &default_buffer, .{});
+    _ = try getTokenizer(&reader, &csv_buf, .{});
 }
 
 test "Read single simple record from file" {
-    const file = try std.fs.cwd().openFile("test/resources/test-1.csv", .{});
-    defer file.close();
-    var csv = try getTokenizer(file, &default_buffer, .{});
+    const data = @embedFile("resources/test-1.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [1024]u8 = undefined;
+    var csv = try getTokenizer(&reader, &csv_buf, .{});
 
     try expectToken(csv_mod.CsvToken{ .field = "1" }, try csv.next());
     try expectToken(csv_mod.CsvToken{ .field = "abc" }, try csv.next());
@@ -57,9 +56,10 @@ test "Read single simple record from file" {
 }
 
 test "Read multiple simple records from file" {
-    const file = try std.fs.cwd().openFile("test/resources/test-2.csv", .{});
-    defer file.close();
-    var csv = try getTokenizer(file, &default_buffer, .{});
+    const data = @embedFile("resources/test-2.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [1024]u8 = undefined;
+    var csv = try getTokenizer(&reader, &csv_buf, .{});
 
     try expectToken(csv_mod.CsvToken{ .field = "1" }, try csv.next());
     try expectToken(csv_mod.CsvToken{ .field = "abc" }, try csv.next());
@@ -75,9 +75,10 @@ test "Read multiple simple records from file" {
 }
 
 test "Read quoted fields" {
-    const file = try std.fs.cwd().openFile("test/resources/test-4.csv", .{});
-    defer file.close();
-    var csv = try getTokenizer(file, &default_buffer, .{});
+    const data = @embedFile("resources/test-4.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [1024]u8 = undefined;
+    var csv = try getTokenizer(&reader, &csv_buf, .{});
 
     try expectToken(csv_mod.CsvToken{ .field = "1" }, try csv.next());
     try expectToken(csv_mod.CsvToken{ .field = "def ghc" }, try csv.next());
@@ -93,9 +94,10 @@ test "Read quoted fields" {
 }
 
 test "Second read is necessary to obtain field" {
-    const file = try std.fs.cwd().openFile("test/resources/test-read-required-for-field.csv", .{});
-    defer file.close();
-    var csv = try getTokenizer(file, default_buffer[0..6], .{});
+    const data = @embedFile("resources/test-read-required-for-field.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [1024]u8 = undefined;
+    var csv = try getTokenizer(&reader, &csv_buf, .{});
 
     try expectToken(csv_mod.CsvToken{ .field = "12345" }, try csv.next());
     try expectToken(csv_mod.CsvToken{ .field = "67890" }, try csv.next());
@@ -107,9 +109,10 @@ test "Second read is necessary to obtain field" {
 }
 
 test "File is empty" {
-    const file = try std.fs.cwd().openFile("test/resources/test-empty.csv", .{});
-    defer file.close();
-    var csv = try getTokenizer(file, &default_buffer, .{});
+    const data = @embedFile("resources/test-empty.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [1024]u8 = undefined;
+    var csv = try getTokenizer(&reader, &csv_buf, .{});
 
     const next = csv.next() catch unreachable;
 
@@ -117,36 +120,40 @@ test "File is empty" {
 }
 
 test "Field is longer than buffer" {
-    const file = try std.fs.cwd().openFile("test/resources/test-error-short-buffer.csv", .{});
-    defer file.close();
-    var csv = try getTokenizer(file, default_buffer[0..9], .{});
+    const data = @embedFile("resources/test-error-short-buffer.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [8]u8 = undefined;
+    var csv = try getTokenizer(&reader, &csv_buf, .{});
 
     const next = csv.next();
     try std.testing.expectError(csv_mod.CsvError.ShortBuffer, next);
 }
 
 test "Quoted field is longer than buffer" {
-    const file = try std.fs.cwd().openFile("test/resources/test-error-short-buffer-quoted.csv", .{});
-    defer file.close();
-    var csv = try getTokenizer(file, default_buffer[0..10], .{});
+    const data = @embedFile("resources/test-error-short-buffer-quoted.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [8]u8 = undefined;
+    var csv = try getTokenizer(&reader, &csv_buf, .{});
 
     const next = csv.next();
     try std.testing.expectError(csv_mod.CsvError.ShortBuffer, next);
 }
 
 test "Quoted field with double quotes is longer than buffer" {
-    const file = try std.fs.cwd().openFile("test/resources/test-error-short-buffer-quoted-with-double.csv", .{});
-    defer file.close();
-    var csv = try getTokenizer(file, default_buffer[0..11], .{});
+    const data = @embedFile("resources/test-error-short-buffer-quoted-with-double.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [8]u8 = undefined;
+    var csv = try getTokenizer(&reader, &csv_buf, .{});
 
     const next = csv.next();
     try std.testing.expectError(csv_mod.CsvError.ShortBuffer, next);
 }
 
 test "Quoted field with double quotes can be read on retry" {
-    const file = try std.fs.cwd().openFile("test/resources/test-error-short-buffer-quoted-with-double.csv", .{});
-    defer file.close();
-    var csv = try getTokenizer(file, default_buffer[0..14], .{});
+    const data = @embedFile("resources/test-error-short-buffer-quoted-with-double.csv");
+    var reader = std.Io.Reader.fixed(data);
+    var csv_buf: [1024]u8 = undefined;
+    var csv = try getTokenizer(&reader, &csv_buf, .{});
 
     try expectToken(csv_mod.CsvToken{ .field = "1234567890\"" }, try csv.next());
     try expectToken(csv_mod.CsvToken{ .row_end = {} }, try csv.next());

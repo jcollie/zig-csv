@@ -8,27 +8,21 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const csv_module = b.addModule("zig-csv", .{
+    const csv_module = b.addModule("csv", .{
         .root_source_file = b.path("src/main.zig"),
     });
 
-    const lib = b.addStaticLibrary(.{
-        .name = "csv",
-        .root_source_file = b.path("src/main.zig"),
-        .optimize = optimize,
-        .target = target,
+    const csv_tests = b.addTest(.{
+        .name = "tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/csv_tokenizer.zig"),
+            .optimize = optimize,
+            .target = target,
+        }),
     });
-    b.installArtifact(lib);
+    csv_tests.root_module.addImport("csv", csv_module);
 
-    const main_tests = b.addTest(.{
-        .name = "csv_tests",
-        .root_source_file = b.path("test/csv_tokenizer.zig"),
-        .optimize = optimize,
-        .target = target,
-    });
-    main_tests.root_module.addImport("csv", csv_module);
-
-    const run_test_cmd = b.addRunArtifact(main_tests);
+    const run_test_cmd = b.addRunArtifact(csv_tests);
     run_test_cmd.has_side_effects = true;
     run_test_cmd.step.dependOn(b.getInstallStep());
 
