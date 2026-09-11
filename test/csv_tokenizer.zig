@@ -162,8 +162,6 @@ test "Quoted field with double quotes can be read on retry" {
     try expect(next == null);
 }
 
-// TODO test last line with new line and without
-
 /// Drive a tokenizer across `data` and assert the entire token stream, so a
 /// terminator case can be stated as the fields and record breaks it ought to
 /// produce. A `null` in `expected` stands for a `row_end`.
@@ -306,18 +304,65 @@ test "A record separator may be any byte" {
     );
 }
 
-test "The final record must be terminated" {
-    // Pre-existing behavior, independent of which terminator is configured:
-    // input whose last record simply stops fails rather than yielding that
-    // record. Pinned here so that a future fix is a deliberate change.
-    var reader = std.Io.Reader.fixed("1,abc\r\n2,def");
+test "Final record need not be terminated" {
+    try expectStream("1,abc\r\n2,def", .{}, 64, &.{ "1", "abc", null, "2", "def", null });
+    try expectStream("1,abc\n2,def", .{}, 64, &.{ "1", "abc", null, "2", "def", null });
+}
+
+test "Input of a single unterminated field" {
+    try expectStream("abc", .{}, 64, &.{ "abc", null });
+}
+
+test "Unterminated record ending in a column separator keeps the empty field" {
+    // `1,` is two fields, exactly as `1,\n` is.
+    try expectStream("1,", .{}, 64, &.{ "1", "", null });
+    try expectStream("1,\n", .{}, 64, &.{ "1", "", null });
+    try expectStream("a,b\r\nc,", .{}, 64, &.{ "a", "b", null, "c", "", null });
+}
+
+test "Unterminated record ending in a quoted field" {
+    try expectStream("1,\"abc\"", .{}, 64, &.{ "1", "abc", null });
+    try expectStream("\"a\",\"b\"", .{}, 64, &.{ "a", "b", null });
+}
+
+test "Unterminated final field spanning a buffer refill" {
+    const data = "aaa,bbb\r\nccc,dddddddddddddddddddd";
+    const expected: []const ?[]const u8 = &.{ "aaa", "bbb", null, "ccc", "dddddddddddddddddddd", null };
+
+    inline for (.{ 21, 22, 24, 28, 32, 64 }) |buffer_len| {
+        expectStream(data, .{}, buffer_len, expected) catch |err| {
+            std.log.warn("failed with buffer_len={d}\n", .{buffer_len});
+            return err;
+        };
+    }
+}
+
+test "Unterminated final record under an explicit byte separator" {
+    try expectStream("1,abc\n2,def", .{ .row_sep = .{ .byte = '\n' } }, 64, &.{ "1", "abc", null, "2", "def", null });
+    try expectStream("1,abc\r2,def", .{ .row_sep = .{ .byte = '\r' } }, 64, &.{ "1", "abc", null, "2", "def", null });
+}
+
+test "A field longer than the buffer is still a short buffer" {
+    // The unterminated-last-record path must not swallow the genuine error:
+    // here the input has not run out, the buffer has.
+    var reader = std.Io.Reader.fixed("aaaaaaaaaaaaaaaaaaaa,b\n");
+    var buffer: [8]u8 = undefined;
+    var csv = try getTokenizer(&reader, &buffer, .{});
+
+    try testing.expectError(csv_mod.CsvError.ShortBuffer, csv.next());
+}
+
+test "Unterminated quoted field with a doubled quote" {
+    try expectStream("\"a\"\"b\"", .{}, 64, &.{ "a\"b", null });
+    try expectStream("\"\"", .{}, 64, &.{ "", null });
+    try expectStream("\"a\r\nb\"", .{}, 64, &.{ "a\r\nb", null });
+}
+
+test "An unclosed quoted field is an error" {
+    var reader = std.Io.Reader.fixed("1,\"abc");
     var buffer: [64]u8 = undefined;
     var csv = try getTokenizer(&reader, &buffer, .{});
 
     try expectToken(csv_mod.CsvToken{ .field = "1" }, try csv.next());
-    try expectToken(csv_mod.CsvToken{ .field = "abc" }, try csv.next());
-    try expectToken(csv_mod.CsvToken{ .row_end = {} }, try csv.next());
-    try expectToken(csv_mod.CsvToken{ .field = "2" }, try csv.next());
-
     try testing.expectError(csv_mod.CsvError.ShortBuffer, csv.next());
 }

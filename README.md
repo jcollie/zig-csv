@@ -173,9 +173,12 @@ next call to `next()`. Copy it if you need to keep it.
   otherwise `next()` fails with `error.ShortBuffer`.
 - An empty line is not skipped: it yields a single zero-length `field`
   followed by `row_end`, the same shape as a one-column row.
-- **The last record must be terminated.** Input whose final record simply
-  stops, with no terminator after it, fails with `error.ShortBuffer` rather
-  than yielding that record.
+- The final record need not be terminated. Input that simply stops yields its
+  last record as usual, so a file with no trailing newline reads the same as
+  one with it. A record ending in a column separator keeps its trailing empty
+  field, so `a,` is two fields exactly as `a,\n` is.
+- An unclosed quoted field is an error (`error.ShortBuffer`), as is a field
+  longer than the buffer.
 
 ## Development
 

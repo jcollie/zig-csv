@@ -146,6 +146,15 @@ pub const CsvReader = struct {
         return null;
     }
 
+    /// Take everything left in the buffer, leaving it empty. Only meaningful
+    /// once the underlying reader is exhausted: it is how the final field of
+    /// an input that ends without a record terminator is recovered.
+    pub fn takeRest(self: *Self) []u8 {
+        const rest = self.current;
+        self.current = self.current[rest.len..];
+        return rest;
+    }
+
     /// Tries to read more data from an underlying reader if buffer is not already full.
     /// If anything was read returns true, otherwise false.
     pub fn read(self: *Self) !bool {
@@ -290,9 +299,16 @@ pub const CsvTokenizer = struct {
             next_status = switch (status) {
                 .initial => if (try self.reader.read()) Status.row_start else Status.eof,
                 .row_start => if (!try self.reader.ensureData()) Status.eof else Status.field,
-                .field => blk: {
+                .field => {
                     if (!try self.reader.ensureData()) {
-                        break :blk .row_end;
+                        // Reaching `.field` with nothing left to read can
+                        // only mean that a column separator was consumed and
+                        // then the input ended, so the record has one last,
+                        // empty field: `a,` is two fields, exactly as `a,\n`
+                        // is. `.row_start` sends an exhausted reader to
+                        // `.eof` instead, so a record never starts here.
+                        self.status = .row_end;
+                        return CsvToken{ .field = "" };
                     }
 
                     return try self.parseField();
@@ -363,17 +379,25 @@ pub const CsvTokenizer = struct {
 
         if (first != '"') {
             var field = try self.reader.until(self.terminals());
-            if (field == null) {
-                // force read - maybe separator was not read yet
-                const hasData = try self.reader.read();
-                if (!hasData) {
+            while (field == null) {
+                // No terminator among what has been read so far, which means
+                // either that more is coming or that the input has run out.
+                const has_data = try self.reader.read();
+                if (!has_data) {
+                    if (self.reader.all_read) {
+                        // The input ends without terminating its last
+                        // record, so whatever remains in the buffer is that
+                        // record's final field. Go straight to `.row_end`,
+                        // which closes the record off an exhausted reader.
+                        self.status = .row_end;
+                        return CsvToken{ .field = self.reader.takeRest() };
+                    }
+
+                    // The buffer filled up without a terminator appearing.
                     return CsvError.ShortBuffer;
                 }
 
                 field = try self.reader.until(self.terminals());
-                if (field == null) {
-                    return CsvError.ShortBuffer;
-                }
             }
 
             const terminator = (try self.reader.peek()).?;
@@ -397,16 +421,24 @@ pub const CsvTokenizer = struct {
             // consume opening quote
             _ = try self.reader.char();
             var quoted_field = try self.reader.untilClosingQuote(self.config.quote);
-            if (quoted_field == null) {
-                // force read - maybe separator was not read yet
-                const hasData = try self.reader.read();
-                if (!hasData) {
+            while (quoted_field == null) {
+                const has_data = try self.reader.read();
+
+                // `untilClosingQuote` withholds a closing quote that is the
+                // last byte in the buffer, because it cannot yet tell a `""`
+                // escape from the end of the field. Once the reader is
+                // exhausted there is nothing left to wait for, so ask again
+                // rather than give up -- that is what lets an input end on a
+                // quoted field with no terminator after it.
+                if (!has_data and !self.reader.all_read) {
                     return CsvError.ShortBuffer;
                 }
 
-                // this read will fill the buffer
                 quoted_field = try self.reader.untilClosingQuote(self.config.quote);
-                if (quoted_field == null) {
+                if (quoted_field == null and !has_data) {
+                    // Nothing more was read and the field still has no
+                    // closing quote: it is unclosed, or longer than the
+                    // buffer.
                     return CsvError.ShortBuffer;
                 }
             }
