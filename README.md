@@ -34,12 +34,13 @@ versions will not build this.
 Add the dependency to your project:
 
 ```console
-zig fetch --save git+https://git.jcollie.dev/jeff/zig-csv.git
+zig fetch --save git+https://git.jcollie.dev/jeff/zig-csv.git#v0.1.0
 ```
 
 That records the resolved commit and hash in your `build.zig.zon` under the
-name `zig_csv`. There are no release tags yet, so the fetch pins whatever
-`main` points at when you run it.
+name `zig_csv`. Naming a tag pins the release; leaving the `#v0.1.0` off
+pins whatever `main` happened to point at when you ran the command, which is
+rarely what you want in a committed manifest.
 
 Then wire the module up in your `build.zig`:
 
