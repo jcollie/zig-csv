@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: © 2026 Jeffrey C. Ollie <jeff@ocjtech.us>
+# SPDX-License-Identifier: MIT
+
+name: test
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: nixos-do-s
+    steps:
+      - name: Check out
+        uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check REUSE compliance
+        run: nix develop -c reuse lint
+
+      - name: Check Zig formatting compliance
+        run: nix develop -c zig fmt --check .
+
+      - name: Test
+        run: nix develop -c zig build test --summary all
+
+      - name: Build
+        run: nix develop -c zig build

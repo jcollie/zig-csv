@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: © 2024 @_beho
+# SPDX-FileCopyrightText: © 2026 Jeffrey C. Ollie <jeff@ocjtech.us>
+# SPDX-License-Identifier: MIT
+
 {
   description = "zig-csv";
 
@@ -24,6 +28,7 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
+            pkgs.reuse
             pkgs.zig_0_16
           ];
         };

@@ -1,57 +1,186 @@
-# zig-csv ![CI](https://github.com/beho/zig-csv/workflows/CI/badge.svg)
+# zig-csv
 
-Low-level CSV parser library for [Zig language](https://github.com/ziglang/zig). Each non-empty line in input is parsed as one or more tokens of type `field`, followed by `row_end`.
+A low-level CSV tokenizer for [Zig](https://ziglang.org/). It reads bytes from
+any `std.Io.Reader` and yields a stream of tokens — one `field` per column,
+followed by a `row_end` at the end of each record.
 
-_This library was conceived as Zig learning project and it was not used by me in production software._
+It does not allocate. The caller hands it a buffer, and fields are assembled
+there, which makes it suitable for streaming a file larger than memory and for
+environments where an allocator is unwelcome.
 
-## Features
+Originally written by [beho](https://github.com/beho), who describes it as a
+Zig learning project rather than production software. This fork keeps it
+building against current Zig releases; see [Credits](#credits).
 
-- Reads UTF-8 files.
-- Provides iterator interface to stream of tokens.
-- Handles quoted fields in which column/row separator can be used. Quote itself can be used in field by doubling it (e.g. `"This is quote: ""."`)
-- Configurable column separator (default `,`), row separator (`\n`) and quote (`"`).
-  - **Currently only single byte characters.**
-- Parser does not allocate – caller provides a buffer that parser operates in. **Buffer must be longer than a longest field in input.**
+## Where this lives
 
-## Example
+The canonical repository is on Forgejo, with a mirror on GitHub:
 
-Following code reads CSV tokens from a file while very naively printing them as table to standard output.
+```console
+git clone https://git.jcollie.dev/jeff/zig-csv.git
+```
+
+```console
+git clone https://github.com/jcollie/zig-csv.git
+```
+
+## Requirements
+
+Zig 0.16.0 or later. The 0.16 release reworked readers and writers, so earlier
+versions will not build this.
+
+## Installation
+
+Add the dependency to your project:
+
+```console
+zig fetch --save git+https://git.jcollie.dev/jeff/zig-csv.git
+```
+
+That records the resolved commit and hash in your `build.zig.zon` under the
+name `zig_csv`. There are no release tags yet, so the fetch pins whatever
+`main` points at when you run it.
+
+Then wire the module up in your `build.zig`:
+
+```zig
+const csv_dep = b.dependency("zig_csv", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("csv", csv_dep.module("csv"));
+```
+
+## Usage
 
 ```zig
 const std = @import("std");
 const csv = @import("csv");
 
-pub fn main() anyerror!void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+pub fn main() !void {
+    const data =
+        \\name,quantity,note
+        \\widget,4,"Contains a comma, and a ""quote"""
+        \\gadget,11,
+        \\
+    ;
 
-    const allocator = &arena.allocator;
-    var buffer = try allocator.alloc(u8, 4096);
+    // Any `*std.Io.Reader` will do; this one reads from memory.
+    var reader: std.Io.Reader = .fixed(data);
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    // The tokenizer never allocates: this buffer is where fields are
+    // assembled, and it must be longer than the longest field in the input.
+    var field_buf: [4096]u8 = undefined;
 
-    if (args.len != 2) {
-        std.log.warn("Single arg is expected", .{});
-        std.process.exit(1);
-    }
+    var tokenizer = try csv.CsvTokenizer.init(&reader, &field_buf, .{});
 
-    const file = try std.fs.cwd().openFile(args[1], .{});
-    defer file.close();
-
-    var csv_tokenizer = try csv.CsvTokenizer(std.fs.File.Reader).init(file.reader(), buffer, .{});
-    const stdout = std.io.getStdOut().writer();
-
-    while (try csv_tokenizer.next()) |token| {
-        switch (token) {
-            .field => |val| {
-                try stdout.writeAll(val);
-                try stdout.writeAll("\t");
-            },
-            .row_end => {
-                try stdout.writeAll("\n");
-            },
-        }
-    }
+    while (try tokenizer.next()) |token| switch (token) {
+        .field => |value| std.debug.print("[{s}] ", .{value}),
+        .row_end => std.debug.print("\n", .{}),
+    };
 }
 ```
+
+which prints:
+
+```text
+[name] [quantity] [note]
+[widget] [4] [Contains a comma, and a "quote"]
+[gadget] [11] []
+```
+
+Note that the embedded comma and the doubled `""` are handled by the
+tokenizer, and that the trailing empty field is reported as a zero-length
+`field` rather than skipped.
+
+### Reading from a file
+
+The tokenizer only wants a `*std.Io.Reader`, so a file reader is the same code
+with a different source. In 0.16 file access goes through an `Io`:
+
+```zig
+var threaded: std.Io.Threaded = .init(gpa, .{});
+defer threaded.deinit();
+const io = threaded.io();
+
+var file = try std.Io.Dir.cwd().openFile(io, "data.csv", .{});
+defer file.close(io);
+
+var read_buf: [4096]u8 = undefined;
+var file_reader = file.reader(io, &read_buf);
+
+var field_buf: [4096]u8 = undefined;
+var tokenizer = try csv.CsvTokenizer.init(&file_reader.interface, &field_buf, .{});
+```
+
+The two buffers do different jobs: `read_buf` is how much of the file is held
+at once, and `field_buf` bounds the longest single field.
+
+## API
+
+| Item | Purpose |
+| --- | --- |
+| `CsvTokenizer.init(reader, buffer, config)` | Build a tokenizer over a `*std.Io.Reader`. |
+| `CsvTokenizer.next()` | Return the next `?CsvToken`, or `null` at end of input. |
+| `CsvToken` | Tagged union: `.field: []const u8` or `.row_end`. |
+| `CsvConfig` | `col_sep` (default `,`), `row_sep` (default `\n`), `quote` (default `"`). |
+| `CsvError` | `ShortBuffer`, `MisplacedQuote`, `NoSeparatorAfterField`. |
+
+A `field` slice points into the caller's buffer and is only valid until the
+next call to `next()`. Copy it if you need to keep it.
+
+## Behavior and limitations
+
+- Input is read as UTF-8.
+- Quoted fields may contain the column separator, the row separator, and the
+  quote character itself when doubled (`"He said ""hi"""`).
+- The separators and quote are configurable, but **only as single bytes** — a
+  multi-byte separator is not supported.
+- The field buffer must be longer than the longest field in the input;
+  otherwise `next()` fails with `error.ShortBuffer`.
+- An empty line is not skipped: it yields a single zero-length `field`
+  followed by `row_end`, the same shape as a one-column row.
+
+## Development
+
+The repository ships a Nix flake with the pinned toolchain:
+
+```console
+nix develop
+```
+
+```console
+zig build test --summary all
+```
+
+The checks that CI enforces are formatting, licensing, the test suite, and the
+build:
+
+```console
+zig fmt --check .
+reuse lint
+zig build test --summary all
+zig build
+```
+
+CI runs on Forgejo Actions; see `.forgejo/workflows/test.yml`.
+
+Some notes on throughput and how to generate test data are in
+[`docs/performance.md`](docs/performance.md).
+
+## Credits
+
+Original author: [beho](https://github.com/beho), whose repository at
+[beho/zig-csv](https://github.com/beho/zig-csv) this is a fork of. The
+tokenizer design and the test suite are theirs. Later upstream contributions
+came from Roman Frołow, Nitin Prakash, xdBronch, and Deins.
+
+This fork carries the library forward across Zig releases — currently 0.16 —
+and adds the Nix flake, the Forgejo workflow, and REUSE licensing metadata.
+
+## License
+
+MIT, for the original work and this fork alike. The project follows the
+[REUSE](https://reuse.software/) specification: every file carries its
+copyright and license, either in an SPDX header or through `REUSE.toml`, and
+the license text is in [`LICENSES/MIT.txt`](LICENSES/MIT.txt).

@@ -1,0 +1,20 @@
+version = 1
+
+# Files that cannot carry an SPDX header of their own: generated or
+# machine-edited manifests, prose where a header would be noise, and the CSV
+# fixtures, which have no comment syntax at all.
+
+[[annotations]]
+path = ["README.md", "docs/performance.md", "test/resources/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "© 2020-2024 @_beho"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["build.zig.zon", "flake.lock"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = [
+  "© 2024 @_beho",
+  "© 2026 Jeffrey C. Ollie <jeff@ocjtech.us>",
+]
+SPDX-License-Identifier = "MIT"

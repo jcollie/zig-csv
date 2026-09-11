@@ -1,7 +1,6 @@
-//  Copyright (c) 2021 beho
-//
-//  This library is free software; you can redistribute it and/or modify it
-//  under the terms of the MIT license. See LICENSE for details.
+// SPDX-FileCopyrightText: © 2020-2024 @_beho
+// SPDX-FileCopyrightText: © 2026 Jeffrey C. Ollie <jeff@ocjtech.us>
+// SPDX-License-Identifier: MIT
 
 const std = @import("std");
 const mem = std.mem;
