@@ -210,7 +210,8 @@ next call to `next()`. Copy it if you need to keep it.
 
 A quote that is never closed is the classic way to lose a CSV file: a parser
 that buffers a record at a time will keep reading, and one stray quote can
-swallow everything after it.
+swallow everything after it — two million rows of it, in the case [2]
+recounts.
 
 That cannot happen here, and not by being careful about it -- the tokenizer
 does not allocate, so a field is bounded by the buffer it is being assembled
@@ -225,8 +226,7 @@ filled first, which a bigger one may well fix.
 
 ## RFC 4180
 
-[RFC 4180](https://www.rfc-editor.org/rfc/rfc4180.txt) describes the format
-this implements. Every clause of its
+RFC 4180 [1] describes the format this implements. Every clause of its
 section 2 is covered, and the checking is mechanical rather than a reading:
 the `rfc4180` fuzz target builds documents that satisfy the RFC's ABNF —
 records, quoting, `""` escaping, and `TEXTDATA` restricted to
@@ -310,6 +310,27 @@ between fuzzing sessions.
 
 Some notes on throughput and how to generate test data are in
 [`docs/performance.md`](docs/performance.md).
+
+## References cited
+
+1. Shafranovich, Y. *Common Format and MIME Type for Comma-Separated Values
+   (CSV) Files.* RFC 4180, Internet Engineering Task Force, October 2005.
+   <https://www.rfc-editor.org/rfc/rfc4180.txt>
+
+   The format this library implements. Section 2 and its ABNF are what the
+   `rfc4180` fuzz target generates against; the section above records where
+   this implementation is deliberately more permissive.
+
+2. Hillman, Chris. *The CSV Test Suite Nobody Writes.* Ghost in the Data,
+   4 March 2026.
+   <https://ghostinthedata.info/posts/2026/2026-03-04-csv-test-suite/>
+
+   Turns the RFC and a catalogue of real-world failures into concrete tests.
+   Two changes here came out of reading it: a byte order mark is consumed
+   rather than handed back as part of the first field, and an unclosed quote
+   reports itself as one instead of as a short buffer. Its worst fixture is
+   the unclosed quote that swallows a file, which is the behavior the section
+   on bounded quotes above exists to rule out.
 
 ## Credits
 
