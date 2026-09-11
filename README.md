@@ -324,13 +324,8 @@ Some notes on throughput and how to generate test data are in
 2. Hillman, Chris. *The CSV Test Suite Nobody Writes.* Ghost in the Data,
    4 March 2026.
    <https://ghostinthedata.info/posts/2026/2026-03-04-csv-test-suite/>
-
-<!-- TODO: submit the Hillman post to the Internet Archive and record the
-     Wayback snapshot alongside the original URL above, so the citation
-     outlives the site. It was not done when the citation was added because
-     archive.org was returning 429 and then serving its "Temporarily Offline"
-     page; nothing is wrong with the URL itself, which answered 200. A
-     personal blog is exactly the kind of source worth archiving. -->
+   Archived 11 September 2026 at
+   <https://web.archive.org/web/20260911140607/https://ghostinthedata.info/posts/2026/2026-03-04-csv-test-suite/>
 
    Turns the RFC and a catalogue of real-world failures into concrete tests.
    Two changes here came out of reading it: a byte order mark is consumed
