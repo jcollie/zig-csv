@@ -32,7 +32,7 @@ pub const max_input = 4096;
 pub const col_seps = [_]u8{ ',', ';', '\t', '|' };
 
 /// How many row separator choices `readParams` offers.
-pub const row_sep_choices = 3;
+pub const row_sep_choices = 4;
 
 /// Smallest and largest field buffer, as powers of two.
 pub const min_buffer_shift = 2;
@@ -53,7 +53,8 @@ fn readParams(smith: *Smith, in: []u8) Params {
 
     const row_sep: csv.RowSeparator = switch (smith.valueRangeAtMost(u8, 0, row_sep_choices - 1)) {
         0 => .any,
-        1 => .{ .byte = '\n' },
+        1 => .crlf,
+        2 => .{ .byte = '\n' },
         else => .{ .byte = '\r' },
     };
 
@@ -128,7 +129,7 @@ fn expectSameTokens(a: []const Token, b: []const Token) !void {
 /// Write `tokens` back out as CSV that the same configuration will read.
 fn encode(gpa: Allocator, tokens: []const Token, config: csv.CsvConfig) ![]u8 {
     const terminator: []const u8 = switch (config.row_sep) {
-        .any => "\r\n",
+        .any, .crlf => "\r\n",
         .byte => |b| &[_]u8{b},
     };
 
@@ -244,10 +245,12 @@ fn reference(gpa: Allocator, data: []const u8, config: csv.CsvConfig) ![]Token {
     if (data.len == 0) return tokens.toOwnedSlice(gpa);
 
     const isTerm = struct {
-        fn f(c: u8, sep: csv.RowSeparator) bool {
+        fn f(bytes: []const u8, at: usize, sep: csv.RowSeparator) bool {
             return switch (sep) {
-                .any => c == '\r' or c == '\n',
-                .byte => |b| c == b,
+                .any => bytes[at] == '\r' or bytes[at] == '\n',
+                // Only the pair terminates; a lone CR is data.
+                .crlf => bytes[at] == '\r' and at + 1 < bytes.len and bytes[at + 1] == '\n',
+                .byte => |b| bytes[at] == b,
             };
         }
     }.f;
@@ -278,11 +281,11 @@ fn reference(gpa: Allocator, data: []const u8, config: csv.CsvConfig) ![]Token {
             }
 
             // Only a separator, a terminator, or the end may follow.
-            if (i < data.len and data[i] != config.col_sep and !isTerm(data[i], config.row_sep)) {
+            if (i < data.len and data[i] != config.col_sep and !isTerm(data, i, config.row_sep)) {
                 return error.NoSeparatorAfterField;
             }
         } else {
-            while (i < data.len and data[i] != config.col_sep and !isTerm(data[i], config.row_sep)) {
+            while (i < data.len and data[i] != config.col_sep and !isTerm(data, i, config.row_sep)) {
                 if (data[i] == config.quote) return error.MisplacedQuote;
                 try field.append(gpa, data[i]);
                 i += 1;
@@ -304,7 +307,14 @@ fn reference(gpa: Allocator, data: []const u8, config: csv.CsvConfig) ![]Token {
         // A record terminator; under `.any`, CR takes a following LF with it.
         const c = data[i];
         i += 1;
-        if (config.row_sep == .any and c == '\r' and i < data.len and data[i] == '\n') i += 1;
+        switch (config.row_sep) {
+            .any => if (c == '\r' and i < data.len and data[i] == '\n') {
+                i += 1;
+            },
+            // `isTerm` already established that an LF follows.
+            .crlf => i += 1,
+            .byte => {},
+        }
 
         try tokens.append(gpa, .row_end);
         if (i >= data.len) break;

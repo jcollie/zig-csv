@@ -47,6 +47,7 @@ pub fn main(init: std.process.Init) !void {
     var rows: usize = 20_000;
     var col_sep: u8 = ',';
     var quote: u8 = '"';
+    var strict = false;
 
     var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
     defer args.deinit();
@@ -62,6 +63,8 @@ pub fn main(init: std.process.Init) !void {
             col_sep = (args.next() orelse return error.MissingValue)[0];
         } else if (std.mem.eql(u8, arg, "--quote")) {
             quote = (args.next() orelse return error.MissingValue)[0];
+        } else if (std.mem.eql(u8, arg, "--strict")) {
+            strict = true;
         } else if (std.mem.eql(u8, arg, "--case")) {
             only = args.next() orelse return error.MissingValue;
         } else {
@@ -73,7 +76,7 @@ pub fn main(init: std.process.Init) !void {
     // Built from parsed arguments so the optimizer cannot see through it.
     const config: csv.CsvConfig = .{
         .col_sep = col_sep,
-        .row_sep = .any,
+        .row_sep = if (strict) .crlf else .any,
         .quote = quote,
     };
 

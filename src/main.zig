@@ -32,6 +32,12 @@ pub const RowSeparator = union(enum) {
     /// them.
     any,
 
+    /// Require exactly the two-byte sequence CR LF, as RFC 4180 specifies.
+    /// A CR that is not followed by an LF, and an LF on its own, are both
+    /// ordinary field data. This is the strict reading; `.any` is the
+    /// forgiving one.
+    crlf,
+
     /// Require exactly this byte. `.byte = '\n'` is the traditional Unix
     /// terminator and `.byte = '\r'` the classic Mac OS one; under either,
     /// the other byte is ordinary field data. Any other byte works too, for
@@ -109,6 +115,35 @@ pub const CsvReader = struct {
                 self.current = self.current[pos..];
                 return s;
             }
+        }
+
+        return null;
+    }
+
+    /// Read up to the first byte in `set`, or to a CR that is immediately
+    /// followed by an LF. A CR with anything else behind it is data.
+    ///
+    /// Returns null when the answer is not yet knowable -- including when a
+    /// CR is the last byte read, since whether it ends the record depends on
+    /// a byte that has not arrived. The caller reads more and asks again; at
+    /// end of input there is nothing more to come and the trailing CR is
+    /// data, which is what taking the rest of the buffer yields.
+    pub fn untilCrlf(self: *Self, set: *const TerminalSet) !?[]u8 {
+        if (!try self.ensureData()) {
+            return null;
+        }
+
+        for (self.current, 0..) |c, pos| {
+            if (c == '\r') {
+                if (pos + 1 >= self.current.len) return null;
+                if (self.current[pos + 1] != '\n') continue;
+            } else if (!set[c]) {
+                continue;
+            }
+
+            const s = self.current[0..pos];
+            self.current = self.current[pos..];
+            return s;
         }
 
         return null;
@@ -263,6 +298,9 @@ pub const CsvTokenizer = struct {
                 terminal_chars[len] = b;
                 len += 1;
             },
+            // Neither CR nor LF ends a field on its own here: only the pair
+            // does, which `untilCrlf` recognizes as it scans.
+            .crlf => {},
         }
 
         terminal_chars[len] = config.quote;
@@ -291,6 +329,7 @@ pub const CsvTokenizer = struct {
     inline fn isRowSepStart(self: *const Self, c: u8) bool {
         return switch (self.config.row_sep) {
             .any => c == '\r' or c == '\n',
+            .crlf => c == '\r',
             .byte => |b| c == b,
         };
     }
@@ -314,6 +353,15 @@ pub const CsvTokenizer = struct {
                         }
                     }
                 }
+            },
+            .crlf => {
+                // The scan only stops on a CR that an LF follows, so for an
+                // unquoted field this is already known. After a quoted field
+                // it is not: there, a CR with no LF behind it is a byte that
+                // has no business between two fields.
+                if (!try self.reader.ensureData()) return CsvError.NoSeparatorAfterField;
+                const lf = (try self.reader.char()) orelse return CsvError.NoSeparatorAfterField;
+                if (lf != '\n') return CsvError.NoSeparatorAfterField;
             },
             .byte => {},
         }
@@ -405,11 +453,21 @@ pub const CsvTokenizer = struct {
         unreachable;
     }
 
+    /// Read up to whatever ends an unquoted field, which depends on how
+    /// records are terminated: under `.crlf` a CR only counts when an LF
+    /// follows it, so that scan has to look ahead.
+    inline fn scanField(self: *Self) !?[]u8 {
+        return switch (self.config.row_sep) {
+            .crlf => self.reader.untilCrlf(&self.terminal_set),
+            .any, .byte => self.reader.untilAny(&self.terminal_set),
+        };
+    }
+
     fn parseField(self: *Self) !CsvToken {
         const first = (try self.reader.peek()).?;
 
         if (first != self.config.quote) {
-            var field = try self.reader.untilAny(&self.terminal_set);
+            var field = try self.scanField();
             while (field == null) {
                 // No terminator among what has been read so far, which means
                 // either that more is coming or that the input has run out.
@@ -428,7 +486,7 @@ pub const CsvTokenizer = struct {
                     return CsvError.ShortBuffer;
                 }
 
-                field = try self.reader.untilAny(&self.terminal_set);
+                field = try self.scanField();
             }
 
             const terminator = (try self.reader.peek()).?;

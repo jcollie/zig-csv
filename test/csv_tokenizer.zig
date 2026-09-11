@@ -367,6 +367,53 @@ test "An unclosed quoted field is an error" {
     try testing.expectError(csv_mod.CsvError.ShortBuffer, csv.next());
 }
 
+test "Strict CRLF: only the pair terminates a record" {
+    const strict: csv_mod.CsvConfig = .{ .row_sep = .crlf };
+
+    try expectStream("a,b\r\nc,d\r\n", strict, 64, &.{ "a", "b", null, "c", "d", null });
+    try expectStream("a,b\r\nc,d", strict, 64, &.{ "a", "b", null, "c", "d", null });
+    try expectStream("a\r\n\r\nb\r\n", strict, 64, &.{ "a", null, "", null, "b", null });
+}
+
+test "Strict CRLF: a lone CR or LF is field data" {
+    const strict: csv_mod.CsvConfig = .{ .row_sep = .crlf };
+
+    try expectStream("a\nb\r\n", strict, 64, &.{ "a\nb", null });
+    try expectStream("a\rb\r\n", strict, 64, &.{ "a\rb", null });
+    try expectStream("a\r", strict, 64, &.{ "a\r", null });
+    try expectStream("x\r\ry\r\n", strict, 64, &.{ "x\r\ry", null });
+}
+
+test "Strict CRLF: a CR split across a buffer refill" {
+    const data = "aaa,bbb\r\nccc\rddd\r\neee\r\n";
+    const expected: []const ?[]const u8 = &.{ "aaa", "bbb", null, "ccc\rddd", null, "eee", null };
+
+    // A refill landing between a CR and the byte that decides its meaning is
+    // the whole difficulty of this mode, so try every small buffer.
+    inline for (.{ 9, 10, 11, 12, 13, 14, 16, 24, 64 }) |buffer_len| {
+        expectStream(data, .{ .row_sep = .crlf }, buffer_len, expected) catch |err| {
+            std.log.warn("failed with buffer_len={d}\n", .{buffer_len});
+            return err;
+        };
+    }
+}
+
+test "Strict CRLF: quoted fields carry CR and LF unharmed" {
+    const strict: csv_mod.CsvConfig = .{ .row_sep = .crlf };
+
+    try expectStream("\"x\ry\nz\r\nw\"\r\n", strict, 64, &.{ "x\ry\nz\r\nw", null });
+    try expectStream("\"a\",\"b\"\r\n", strict, 64, &.{ "a", "b", null });
+}
+
+test "Strict CRLF: a bare CR after a quoted field is an error" {
+    var reader = std.Io.Reader.fixed("\"a\"\rb\r\n");
+    var buffer: [64]u8 = undefined;
+    var csv = try getTokenizer(&reader, &buffer, .{ .row_sep = .crlf });
+
+    try expectToken(csv_mod.CsvToken{ .field = "a" }, try csv.next());
+    try testing.expectError(csv_mod.CsvError.NoSeparatorAfterField, csv.next());
+}
+
 test "A configured quote is honored in place of the default" {
     const single: csv_mod.CsvConfig = .{ .quote = '\'' };
 
@@ -384,4 +431,19 @@ test "A configured quote still rejects what the default would" {
 
     try expectToken(csv_mod.CsvToken{ .field = "a" }, try csv.next());
     try testing.expectError(csv_mod.CsvError.NoSeparatorAfterField, csv.next());
+}
+
+test "Strict CRLF needs one byte more headroom than the buffer alone" {
+    // Deciding whether a CR ends the record takes the CR and the byte behind
+    // it in the buffer together, so `.crlf` wants one byte more than `.any`
+    // does for the same field. It says so with an error rather than
+    // misreading the input.
+    const data = "ccc\rddd\r\neee\r\n"; // longest field is 7 bytes
+
+    try expectStream(data, .{ .row_sep = .crlf }, 9, &.{ "ccc\rddd", null, "eee", null });
+
+    var reader = std.Io.Reader.fixed(data);
+    var buffer: [8]u8 = undefined;
+    var csv = try getTokenizer(&reader, &buffer, .{ .row_sep = .crlf });
+    try testing.expectError(csv_mod.CsvError.ShortBuffer, csv.next());
 }
