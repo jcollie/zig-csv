@@ -34,7 +34,7 @@ versions will not build this.
 Add the dependency to your project:
 
 ```console
-zig fetch --save git+https://git.jcollie.dev/jeff/zig-csv.git#v0.1.0
+zig fetch --save git+https://git.jcollie.dev/jeff/zig-csv.git#v0.2.0
 ```
 
 That records the resolved commit and hash in your `build.zig.zon` under the
