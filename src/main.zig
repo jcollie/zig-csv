@@ -91,6 +91,29 @@ pub const CsvReader = struct {
         return self.current[0];
     }
 
+    /// A byte is a terminator or it is not; the table answers in one load,
+    /// where a list of terminators costs a comparison apiece for every byte
+    /// scanned.
+    pub const TerminalSet = [256]bool;
+
+    /// Read up to the first byte in `set`. This is `until` with the inner
+    /// loop hoisted into a table, and is the hot path for unquoted fields.
+    pub fn untilAny(self: *Self, set: *const TerminalSet) !?[]u8 {
+        if (!try self.ensureData()) {
+            return null;
+        }
+
+        for (self.current, 0..) |c, pos| {
+            if (set[c]) {
+                const s = self.current[0..pos];
+                self.current = self.current[pos..];
+                return s;
+            }
+        }
+
+        return null;
+    }
+
     pub fn until(self: *Self, terminators: []const u8) !?[]u8 {
         if (!try self.ensureData()) {
             return null;
@@ -214,6 +237,10 @@ pub const CsvTokenizer = struct {
     terminal_chars: [4]u8 = undefined,
     terminal_chars_len: u8 = 0,
 
+    /// The same terminators as a lookup table, which is what the scan
+    /// actually uses.
+    terminal_set: CsvReader.TerminalSet = @splat(false),
+
     reader: CsvReader,
 
     status: Status = .initial,
@@ -241,10 +268,14 @@ pub const CsvTokenizer = struct {
         terminal_chars[len] = '"';
         len += 1;
 
+        var terminal_set: CsvReader.TerminalSet = @splat(false);
+        for (terminal_chars[0..len]) |c| terminal_set[c] = true;
+
         return Self{
             .config = config,
             .terminal_chars = terminal_chars,
             .terminal_chars_len = len,
+            .terminal_set = terminal_set,
             .reader = CsvReader.init(reader, buffer),
         };
     }
@@ -378,7 +409,7 @@ pub const CsvTokenizer = struct {
         const first = (try self.reader.peek()).?;
 
         if (first != '"') {
-            var field = try self.reader.until(self.terminals());
+            var field = try self.reader.untilAny(&self.terminal_set);
             while (field == null) {
                 // No terminator among what has been read so far, which means
                 // either that more is coming or that the input has run out.
@@ -397,7 +428,7 @@ pub const CsvTokenizer = struct {
                     return CsvError.ShortBuffer;
                 }
 
-                field = try self.reader.until(self.terminals());
+                field = try self.reader.untilAny(&self.terminal_set);
             }
 
             const terminator = (try self.reader.peek()).?;
