@@ -169,7 +169,8 @@ next call to `next()`. Copy it if you need to keep it.
 - Quoted fields may contain the column separator, the row separator, and the
   quote character itself when doubled (`"He said ""hi"""`).
 - The column separator and quote are configurable, but **only as single
-  bytes** — a multi-byte column separator is not supported.
+  bytes** — a multi-byte column separator is not supported. Setting `quote`
+  makes that byte the quote and leaves `"` as ordinary field data.
 - The field buffer must be longer than the longest field in the input;
   otherwise `next()` fails with `error.ShortBuffer`.
 - An empty line is not skipped: it yields a single zero-length `field`

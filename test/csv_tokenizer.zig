@@ -366,3 +366,22 @@ test "An unclosed quoted field is an error" {
     try expectToken(csv_mod.CsvToken{ .field = "1" }, try csv.next());
     try testing.expectError(csv_mod.CsvError.ShortBuffer, csv.next());
 }
+
+test "A configured quote is honored in place of the default" {
+    const single: csv_mod.CsvConfig = .{ .quote = '\'' };
+
+    try expectStream("'a,b',c\n", single, 64, &.{ "a,b", "c", null });
+    try expectStream("'a''b'\n", single, 64, &.{ "a'b", null });
+    // The default quote becomes ordinary data once it is not the quote.
+    try expectStream("a\"b,c\n", single, 64, &.{ "a\"b", "c", null });
+    try expectStream("'a;b';c\n", .{ .quote = '\'', .col_sep = ';' }, 64, &.{ "a;b", "c", null });
+}
+
+test "A configured quote still rejects what the default would" {
+    var reader = std.Io.Reader.fixed("'a'x\n");
+    var buffer: [64]u8 = undefined;
+    var csv = try getTokenizer(&reader, &buffer, .{ .quote = '\'' });
+
+    try expectToken(csv_mod.CsvToken{ .field = "a" }, try csv.next());
+    try testing.expectError(csv_mod.CsvError.NoSeparatorAfterField, csv.next());
+}

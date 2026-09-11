@@ -148,7 +148,7 @@ pub const CsvReader = struct {
             if (c == quote) {
                 // double quotes, shift forward
                 // print("PEEK {c}\n", .{buffer[idx + 1]});
-                if (idx < self.current.len - 1 and self.current[idx + 1] == '"') {
+                if (idx < self.current.len - 1 and self.current[idx + 1] == quote) {
                     // print("DOUBLE QUOTES\n", .{});
                     contains_quotes = true;
                     idx += 1;
@@ -265,7 +265,7 @@ pub const CsvTokenizer = struct {
             },
         }
 
-        terminal_chars[len] = '"';
+        terminal_chars[len] = config.quote;
         len += 1;
 
         var terminal_set: CsvReader.TerminalSet = @splat(false);
@@ -408,7 +408,7 @@ pub const CsvTokenizer = struct {
     fn parseField(self: *Self) !CsvToken {
         const first = (try self.reader.peek()).?;
 
-        if (first != '"') {
+        if (first != self.config.quote) {
             var field = try self.reader.untilAny(&self.terminal_set);
             while (field == null) {
                 // No terminator among what has been read so far, which means
