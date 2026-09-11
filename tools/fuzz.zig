@@ -167,6 +167,7 @@ fn report(stats: Stats, failures: u64) void {
         \\-- oracle --
         \\agreed (parsed) : {d}
         \\agreed (rejected): {d}
+        \\RFC 4180 documents: {d}
         \\
         \\-- generation sanity --
         \\empty payloads    : {d} ({d}%)
@@ -180,6 +181,7 @@ fn report(stats: Stats, failures: u64) void {
         failures,
         fuzz.accepted,
         fuzz.rejected,
+        fuzz.documents,
         stats.empty_payloads,
         if (stats.iterations == 0) 0 else stats.empty_payloads * 100 / stats.iterations,
         if (stats.iterations == 0) 0 else stats.payload_bytes / stats.iterations,

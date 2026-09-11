@@ -382,6 +382,165 @@ fn differential(smith: *Smith) anyerror!void {
 pub var accepted: u64 = 0;
 pub var rejected: u64 = 0;
 
+/// Walks the fuzzer's payload as a stream of choices, so that mutating a
+/// byte reshapes the document rather than merely changing a character in it.
+const Choices = struct {
+    bytes: []const u8,
+    at: usize = 0,
+
+    fn next(c: *Choices) u8 {
+        if (c.bytes.len == 0) return 0;
+        const b = c.bytes[c.at % c.bytes.len];
+        c.at +%= 1;
+        return b;
+    }
+
+    /// A number below `n`, which is only ever a small bound here.
+    fn below(c: *Choices, n: u8) u8 {
+        return if (n == 0) 0 else c.next() % n;
+    }
+};
+
+/// TEXTDATA = %x20-21 / %x23-2B / %x2D-7E: printable ASCII without the quote
+/// or the comma, which is everything a non-escaped field may hold.
+fn textdata(c: *Choices) u8 {
+    const printable = 0x7e - 0x20 + 1;
+    var byte: u8 = 0x20 + c.next() % printable;
+    if (byte == '"' or byte == ',') byte = 'x';
+    return byte;
+}
+
+/// Build a document that satisfies RFC 4180's ABNF, and the token stream it
+/// must produce. Returns null for the documents the grammar cannot pin down.
+///
+///     file    = [header CRLF] record *(CRLF record) [CRLF]
+///     record  = field *(COMMA field)
+///     field   = escaped / non-escaped
+///     escaped = DQUOTE *(TEXTDATA / COMMA / CR / LF / 2DQUOTE) DQUOTE
+///
+fn buildRfcDocument(
+    gpa: Allocator,
+    c: *Choices,
+    doc: *std.ArrayList(u8),
+    expected: *std.ArrayList(Token),
+) !bool {
+    const records = 1 + c.below(4);
+    var tail_is_one_empty_field = false;
+
+    for (0..records) |rec| {
+        if (rec != 0) try doc.appendSlice(gpa, "\r\n");
+
+        const fields = 1 + c.below(4);
+        const record_start = doc.items.len;
+
+        for (0..fields) |f| {
+            if (f != 0) try doc.append(gpa, ',');
+
+            var value: std.ArrayList(u8) = .empty;
+            defer value.deinit(gpa);
+
+            const escaped = c.below(2) == 1;
+            const len = c.below(7);
+            for (0..len) |_| {
+                if (escaped) {
+                    try value.append(gpa, switch (c.below(5)) {
+                        0 => textdata(c),
+                        1 => ',',
+                        2 => '\r',
+                        3 => '\n',
+                        else => '"',
+                    });
+                } else {
+                    try value.append(gpa, textdata(c));
+                }
+            }
+
+            if (escaped) {
+                try doc.append(gpa, '"');
+                for (value.items) |ch| {
+                    if (ch == '"') try doc.append(gpa, '"'); // 2DQUOTE
+                    try doc.append(gpa, ch);
+                }
+                try doc.append(gpa, '"');
+            } else {
+                try doc.appendSlice(gpa, value.items);
+            }
+
+            try expected.append(gpa, .{ .field = try gpa.dupe(u8, value.items) });
+        }
+
+        try expected.append(gpa, .row_end);
+
+        // A final record of one empty field contributes no bytes at all.
+        if (rec == records - 1 and fields == 1 and doc.items.len == record_start) {
+            tail_is_one_empty_field = true;
+        }
+    }
+
+    if (c.below(2) == 1) try doc.appendSlice(gpa, "\r\n");
+
+    // The grammar cannot tell a final record holding one empty field from the
+    // optional trailing CRLF, because they are the same bytes; nor an empty
+    // file from a single record holding a single empty field. The tokenizer
+    // resolves both the way every implementation does, so neither is evidence
+    // about it either way.
+    if (tail_is_one_empty_field or doc.items.len == 0) return false;
+    return true;
+}
+
+/// Every document the RFC's grammar admits must come back out as the fields
+/// that went into it. This is the conformance claim the README makes, kept
+/// here so that it is checked rather than asserted.
+fn rfc4180(smith: *Smith) anyerror!void {
+    var in: [max_input]u8 = undefined;
+    const p = readParams(smith, &in);
+
+    // The document is written with CRLF, so only the configurations that
+    // read CRLF as a terminator can be held to this. The separator and quote
+    // stay as the RFC defines them.
+    const config: csv.CsvConfig = .{
+        .row_sep = if (p.config.row_sep == .crlf) .crlf else .any,
+        .skip_bom = p.config.skip_bom,
+    };
+
+    var c: Choices = .{ .bytes = p.data };
+
+    var doc: std.ArrayList(u8) = .empty;
+    defer doc.deinit(backing);
+
+    var expected: std.ArrayList(Token) = .empty;
+    defer {
+        for (expected.items) |token| switch (token) {
+            .field => |value| backing.free(value),
+            .row_end => {},
+        };
+        expected.deinit(backing);
+    }
+
+    if (!try buildRfcDocument(backing, &c, &doc, &expected)) return;
+
+    // Roomy on purpose: a short buffer is a limit of the caller's, and this
+    // target is about the grammar. Buffer sizes are another target's business.
+    const actual = collect(backing, doc.items, config, doc.items.len + 16) catch |err| {
+        std.debug.print("rfc4180: valid document rejected: {t}\n  \"{f}\"\n", .{
+            err, std.zig.fmtString(doc.items),
+        });
+        return err;
+    };
+    defer freeTokens(backing, actual);
+
+    expectSameTokens(actual, expected.items) catch |err| {
+        std.debug.print("rfc4180: {t} for \"{f}\"\n", .{ err, std.zig.fmtString(doc.items) });
+        return err;
+    };
+
+    documents += 1;
+}
+
+/// How many RFC-valid documents have been checked, so a run that generated
+/// none is visible rather than silently green.
+pub var documents: u64 = 0;
+
 pub const Target = struct {
     name: []const u8,
     run: *const fn (smith: *Smith) anyerror!void,
@@ -392,6 +551,7 @@ pub const targets = [_]Target{
     .{ .name = "buffer-invariance", .run = bufferInvariance },
     .{ .name = "round-trip", .run = roundTrip },
     .{ .name = "differential", .run = differential },
+    .{ .name = "rfc4180", .run = rfc4180 },
 };
 
 test "every target runs over a small corpus" {

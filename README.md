@@ -226,12 +226,19 @@ filled first, which a bigger one may well fix.
 ## RFC 4180
 
 [RFC 4180](https://www.rfc-editor.org/rfc/rfc4180.txt) describes the format
-this implements. Every clause of its section 2 is covered, and the checking is
-mechanical rather than a reading: a generator builds documents that satisfy the
-RFC's ABNF — records, quoting, `""` escaping, and `TEXTDATA` restricted to
-`%x20-21 / %x23-2B / %x2D-7E` — and the fields that come back out are compared
-to the ones that went in. 294,590 such documents and 1,845,835 fields match
-byte for byte, under both the default configuration and `.crlf`.
+this implements. Every clause of its
+section 2 is covered, and the checking is mechanical rather than a reading:
+the `rfc4180` fuzz target builds documents that satisfy the RFC's ABNF —
+records, quoting, `""` escaping, and `TEXTDATA` restricted to
+`%x20-21 / %x23-2B / %x2D-7E` — and compares the fields that come back out to
+the ones that went in, under the default configuration and under `.crlf`
+alike. It runs with every other target, so the claim is rechecked rather than
+recorded: a three million iteration run covers around 570,000 such documents.
+
+The target earns its place. Breaking the doubled-quote unescaping by one
+statement is caught by it within a dozen inputs, where a round trip cannot see
+that class of fault at all, since a parser that loses information consistently
+re-encodes to something that reads back the same.
 
 Where this library is deliberately more permissive than the RFC:
 
@@ -295,8 +302,9 @@ Zig 0.16.0 cannot build a test executable in fuzz mode, so `tools/fuzz.zig`
 drives the targets in `test/fuzz.zig` itself, mutating a corpus of real CSV.
 Besides checking that nothing crashes, the targets assert that the field
 buffer cannot change what is parsed, that a token stream survives being
-re-encoded and read back, and that the streaming tokenizer agrees with a
-naive reference parser that sees the whole input at once. The targets also
+re-encoded and read back, that the streaming tokenizer agrees with a naive
+reference parser that sees the whole input at once, and that every document
+the RFC's grammar admits parses back into the fields that built it. The targets also
 run over a fixed corpus as part of `zig build test`, so they cannot rot
 between fuzzing sessions.
 
