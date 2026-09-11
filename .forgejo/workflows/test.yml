@@ -4,13 +4,13 @@
 name: test
 
 on:
-  # Branches named explicitly so that pushing a tag does not build the commit
-  # a second time: a bare `push` matches tag refs too, and `--follow-tags` on
-  # a release therefore ran the whole suite again over a tree that had just
-  # passed it.
+  # Every branch, and no tags. A bare `push` matches tag refs too, so
+  # `--follow-tags` at a release built the commit a second time over a tree
+  # that had just passed; naming branches at all excludes tags, and `**`
+  # keeps every branch building rather than only the default one.
   push:
     branches:
-      - main
+      - '**'
   workflow_dispatch:
 
 jobs:
