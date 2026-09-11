@@ -116,6 +116,38 @@ var tokenizer = try csv.CsvTokenizer.init(&file_reader.interface, &field_buf, .{
 The two buffers do different jobs: `read_buf` is how much of the file is held
 at once, and `field_buf` bounds the longest single field.
 
+## Record terminators
+
+By default the tokenizer accepts CR, LF, or CRLF, so a file written on any of
+the three platform conventions reads without configuration — including a file
+that is inconsistent about it, since the terminator is decided per record. A CR
+immediately followed by an LF counts as one terminator rather than two, so CRLF
+input does not produce an empty record between every pair of real ones.
+
+To require one exact byte instead, set `row_sep` to `.byte`:
+
+```zig
+// Strictly Unix: a CR is ordinary field data.
+var tokenizer = try csv.CsvTokenizer.init(&reader, &field_buf, .{
+    .row_sep = .{ .byte = '\n' },
+});
+```
+
+```zig
+// Classic Mac OS: an LF is ordinary field data.
+var tokenizer = try csv.CsvTokenizer.init(&reader, &field_buf, .{
+    .row_sep = .{ .byte = '\r' },
+});
+```
+
+`.byte` takes any byte, not just the two, for input that separates records by
+something else entirely. Note that `.any` is the default, so a CR that used to
+survive to the end of a field under the old LF-only behavior is now consumed
+as part of the terminator.
+
+Inside a quoted field none of this applies: CR and LF are data there, and a
+quoted field may span lines.
+
 ## API
 
 | Item | Purpose |
@@ -123,7 +155,8 @@ at once, and `field_buf` bounds the longest single field.
 | `CsvTokenizer.init(reader, buffer, config)` | Build a tokenizer over a `*std.Io.Reader`. |
 | `CsvTokenizer.next()` | Return the next `?CsvToken`, or `null` at end of input. |
 | `CsvToken` | Tagged union: `.field: []const u8` or `.row_end`. |
-| `CsvConfig` | `col_sep` (default `,`), `row_sep` (default `\n`), `quote` (default `"`). |
+| `CsvConfig` | `col_sep` (default `,`), `row_sep` (default `.any`), `quote` (default `"`). |
+| `RowSeparator` | `.any` to accept CR, LF or CRLF, or `.{ .byte = c }` to require exactly one byte. |
 | `CsvError` | `ShortBuffer`, `MisplacedQuote`, `NoSeparatorAfterField`. |
 
 A `field` slice points into the caller's buffer and is only valid until the
@@ -134,12 +167,15 @@ next call to `next()`. Copy it if you need to keep it.
 - Input is read as UTF-8.
 - Quoted fields may contain the column separator, the row separator, and the
   quote character itself when doubled (`"He said ""hi"""`).
-- The separators and quote are configurable, but **only as single bytes** — a
-  multi-byte separator is not supported.
+- The column separator and quote are configurable, but **only as single
+  bytes** — a multi-byte column separator is not supported.
 - The field buffer must be longer than the longest field in the input;
   otherwise `next()` fails with `error.ShortBuffer`.
 - An empty line is not skipped: it yields a single zero-length `field`
   followed by `row_end`, the same shape as a one-column row.
+- **The last record must be terminated.** Input whose final record simply
+  stops, with no terminator after it, fails with `error.ShortBuffer` rather
+  than yielding that record.
 
 ## Development
 

@@ -23,9 +23,25 @@ pub const CsvError = error{
     NoSeparatorAfterField,
 };
 
+/// How records are terminated.
+pub const RowSeparator = union(enum) {
+    /// Accept CR, LF, or CRLF interchangeably, so that a file may use any of
+    /// them -- and, in a file that is inconsistent about it, so may each
+    /// individual record. A CR immediately followed by an LF is one
+    /// terminator, not two, and so does not produce an empty record between
+    /// them.
+    any,
+
+    /// Require exactly this byte. `.byte = '\n'` is the traditional Unix
+    /// terminator and `.byte = '\r'` the classic Mac OS one; under either,
+    /// the other byte is ordinary field data. Any other byte works too, for
+    /// inputs that separate records by something else entirely.
+    byte: u8,
+};
+
 pub const CsvConfig = struct {
     col_sep: u8 = ',',
-    row_sep: u8 = '\n',
+    row_sep: RowSeparator = .any,
     quote: u8 = '"',
 };
 
@@ -179,18 +195,88 @@ pub const CsvTokenizer = struct {
     const Self = @This();
 
     config: CsvConfig,
-    terminal_chars: [3]u8 = undefined,
+
+    /// The bytes that end an unquoted field. `.any` contributes both CR and
+    /// LF, so this is sized for the largest case and used through
+    /// `terminals()`, which trims it to what was actually filled in. It is
+    /// deliberately not stored as a slice: `init` returns by value, and a
+    /// slice into the returned struct's own array would point at the
+    /// temporary rather than at the copy the caller keeps.
+    terminal_chars: [4]u8 = undefined,
+    terminal_chars_len: u8 = 0,
 
     reader: CsvReader,
 
     status: Status = .initial,
 
     pub fn init(reader: *std.Io.Reader, buffer: []u8, config: CsvConfig) !Self {
+        var terminal_chars: [4]u8 = undefined;
+        var len: u8 = 0;
+
+        terminal_chars[len] = config.col_sep;
+        len += 1;
+
+        switch (config.row_sep) {
+            .any => {
+                terminal_chars[len] = '\r';
+                len += 1;
+                terminal_chars[len] = '\n';
+                len += 1;
+            },
+            .byte => |b| {
+                terminal_chars[len] = b;
+                len += 1;
+            },
+        }
+
+        terminal_chars[len] = '"';
+        len += 1;
+
         return Self{
             .config = config,
-            .terminal_chars = [_]u8{ config.col_sep, config.row_sep, '"' },
+            .terminal_chars = terminal_chars,
+            .terminal_chars_len = len,
             .reader = CsvReader.init(reader, buffer),
         };
+    }
+
+    /// The bytes that end an unquoted field, for this configuration.
+    inline fn terminals(self: *const Self) []const u8 {
+        return self.terminal_chars[0..self.terminal_chars_len];
+    }
+
+    /// Whether `c` begins a record terminator. Under `.any` this is true of
+    /// both CR and LF; whether a CR is followed by an LF is decided later, by
+    /// `consumeRowSeparator`.
+    inline fn isRowSepStart(self: *const Self, c: u8) bool {
+        return switch (self.config.row_sep) {
+            .any => c == '\r' or c == '\n',
+            .byte => |b| c == b,
+        };
+    }
+
+    /// Consume one record terminator, which has already been shown to be
+    /// next by `isRowSepStart`. Under `.any`, a CR takes an LF with it when
+    /// one follows, so that CRLF ends a single record.
+    fn consumeRowSeparator(self: *Self) !void {
+        const c = (try self.reader.char()).?;
+        assert(self.isRowSepStart(c));
+
+        switch (self.config.row_sep) {
+            .any => if (c == '\r') {
+                // The LF may not have been read yet, and there may be no LF
+                // at all -- a lone CR ends the record, and so does a CR that
+                // is the last byte in the input.
+                if (try self.reader.ensureData()) {
+                    if (try self.reader.peek()) |next_c| {
+                        if (next_c == '\n') {
+                            _ = try self.reader.char();
+                        }
+                    }
+                }
+            },
+            .byte => {},
+        }
     }
 
     pub fn next(self: *Self) !?CsvToken {
@@ -234,7 +320,7 @@ pub const CsvTokenizer = struct {
                             break :blk Status.field;
                         }
 
-                        if (value == self.config.row_sep) {
+                        if (self.isRowSepStart(value)) {
                             break :blk Status.row_end;
                         }
 
@@ -254,8 +340,7 @@ pub const CsvTokenizer = struct {
                         return CsvToken{ .row_end = {} };
                     }
 
-                    const rowSep = try self.reader.char();
-                    assert(rowSep == self.config.row_sep);
+                    try self.consumeRowSeparator();
 
                     self.status = Status.row_start;
 
@@ -277,7 +362,7 @@ pub const CsvTokenizer = struct {
         const first = (try self.reader.peek()).?;
 
         if (first != '"') {
-            var field = try self.reader.until(&self.terminal_chars);
+            var field = try self.reader.until(self.terminals());
             if (field == null) {
                 // force read - maybe separator was not read yet
                 const hasData = try self.reader.read();
@@ -285,7 +370,7 @@ pub const CsvTokenizer = struct {
                     return CsvError.ShortBuffer;
                 }
 
-                field = try self.reader.until(&self.terminal_chars);
+                field = try self.reader.until(self.terminals());
                 if (field == null) {
                     return CsvError.ShortBuffer;
                 }
@@ -298,7 +383,7 @@ pub const CsvTokenizer = struct {
                 return CsvToken{ .field = field.? };
             }
 
-            if (terminator == self.config.row_sep) {
+            if (self.isRowSepStart(terminator)) {
                 self.status = .row_end;
                 return CsvToken{ .field = field.? };
             }
