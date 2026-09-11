@@ -170,7 +170,7 @@ quoted field may span lines.
 | `CsvTokenizer.init(reader, buffer, config)` | Build a tokenizer over a `*std.Io.Reader`. |
 | `CsvTokenizer.next()` | Return the next `?CsvToken`, or `null` at end of input. |
 | `CsvToken` | Tagged union: `.field: []const u8` or `.row_end`. |
-| `CsvConfig` | `col_sep` (default `,`), `row_sep` (default `.any`), `quote` (default `"`). |
+| `CsvConfig` | `col_sep` (default `,`), `row_sep` (default `.any`), `quote` (default `"`), `skip_bom` (default `true`). |
 | `RowSeparator` | `.any` to accept CR, LF or CRLF, `.crlf` to require the pair, or `.{ .byte = c }` to require one byte. |
 | `CsvError` | `ShortBuffer`, `MisplacedQuote`, `NoSeparatorAfterField`, `UnclosedQuote`. |
 
@@ -199,6 +199,12 @@ next call to `next()`. Copy it if you need to keep it.
   errors. `error.UnclosedQuote` means the input ended with a field still open,
   so a larger buffer would not help; `error.ShortBuffer` means the buffer
   filled before the field ended, so it would.
+- A UTF-8 byte order mark at the very start of the input is consumed rather
+  than handed back as the opening bytes of the first field, since a header
+  read with one attached does not compare equal to the name it appears to
+  spell. Set `skip_bom = false` to pass the input through byte for byte. Only
+  the first mark in the first position is treated as a mark; anywhere else it
+  is ordinary data.
 
 ## An unclosed quote cannot run away
 
@@ -245,6 +251,11 @@ Where this library is deliberately more permissive than the RFC:
 Two things the RFC mentions that a tokenizer is the wrong layer for: the
 optional header line is just the first record, and the rule that every record
 carry the same number of fields needs a record at a time rather than a token.
+
+Skipping the byte order mark is the one thing here that does not round trip.
+A first field whose own value begins with U+FEFF is written back out at the
+start of the file, where it reads as a mark and is stripped. A producer that
+quotes that field, or simply does not emit a mark, avoids the question.
 
 ## Development
 

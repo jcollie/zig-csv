@@ -57,7 +57,17 @@ pub const CsvConfig = struct {
     col_sep: u8 = ',',
     row_sep: RowSeparator = .any,
     quote: u8 = '"',
+
+    /// Consume a UTF-8 byte order mark at the very start of the input rather
+    /// than handing it back as the first bytes of the first field. Files
+    /// exported by spreadsheet software routinely carry one, and a header
+    /// that begins with it does not compare equal to the name it appears to
+    /// spell. Set false to have the input passed through byte for byte.
+    skip_bom: bool = true,
 };
+
+/// The UTF-8 encoding of U+FEFF.
+pub const utf8_bom = "\xef\xbb\xbf";
 
 const QuoteFieldReadResult = struct {
     value: []u8,
@@ -210,6 +220,21 @@ pub const CsvReader = struct {
         }
 
         return null;
+    }
+
+    /// Consume a UTF-8 byte order mark if the input opens with one.
+    ///
+    /// Called before anything has been handed out, so moving the buffer
+    /// around is safe here in a way it would not be later.
+    pub fn skipBom(self: *Self) !void {
+        while (self.current.len < utf8_bom.len) {
+            // A buffer too small to hold a mark cannot be shown one.
+            if (!try self.read()) break;
+        }
+
+        if (std.mem.startsWith(u8, self.current, utf8_bom)) {
+            self.current = self.current[utf8_bom.len..];
+        }
     }
 
     /// Take everything left in the buffer, leaving it empty. Only meaningful
@@ -384,7 +409,11 @@ pub const CsvTokenizer = struct {
         while (next_status) |status| {
             // print("STATUS: {}\n", .{self.status});
             next_status = switch (status) {
-                .initial => if (try self.reader.read()) Status.row_start else Status.eof,
+                .initial => blk: {
+                    if (!try self.reader.read()) break :blk Status.eof;
+                    if (self.config.skip_bom) try self.reader.skipBom();
+                    break :blk Status.row_start;
+                },
                 .row_start => if (!try self.reader.ensureData()) Status.eof else Status.field,
                 .field => {
                     if (!try self.reader.ensureData()) {

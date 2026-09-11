@@ -59,10 +59,15 @@ fn readParams(smith: *Smith, in: []u8) Params {
     };
 
     const shift = smith.valueRangeAtMost(u8, min_buffer_shift, max_buffer_shift);
+    const skip_bom = smith.valueRangeAtMost(u8, 0, 1) == 1;
 
     return .{
         .data = in[0..n],
-        .config = .{ .col_sep = col_sep, .row_sep = row_sep },
+        .config = .{
+            .col_sep = col_sep,
+            .row_sep = row_sep,
+            .skip_bom = skip_bom,
+        },
         .buffer_len = @as(usize, 1) << @intCast(shift),
     };
 }
@@ -143,9 +148,19 @@ fn encode(gpa: Allocator, tokens: []const Token, config: csv.CsvConfig) ![]u8 {
                 if (!first_in_row) try out.append(gpa, config.col_sep);
                 first_in_row = false;
 
-                const needs_quotes = for (value) |c| {
+                var needs_quotes = for (value) |c| {
                     if (c == config.col_sep or c == config.quote or c == '\r' or c == '\n') break true;
                 } else false;
+
+                // A first field whose own value opens with the byte order
+                // mark would be read back as a mark and stripped. Quoting it
+                // keeps the mark out of the first position, which is the only
+                // place it is treated as a mark.
+                if (config.skip_bom and out.items.len == 0 and
+                    std.mem.startsWith(u8, value, csv.utf8_bom))
+                {
+                    needs_quotes = true;
+                }
 
                 if (!needs_quotes) {
                     try out.appendSlice(gpa, value);
@@ -234,13 +249,18 @@ fn roundTrip(smith: *Smith) anyerror!void {
 /// the streaming tokenizer's machinery -- which is the point: the two agreeing
 /// is evidence, where the streaming one agreeing with itself is not. A parser
 /// that loses information consistently survives a round trip but not this.
-fn reference(gpa: Allocator, data: []const u8, config: csv.CsvConfig) ![]Token {
+fn reference(gpa: Allocator, input: []const u8, config: csv.CsvConfig) ![]Token {
     var tokens: std.ArrayList(Token) = .empty;
     defer tokens.deinit(gpa);
     errdefer for (tokens.items) |token| switch (token) {
         .field => |value| gpa.free(value),
         .row_end => {},
     };
+
+    var data = input;
+    if (config.skip_bom and std.mem.startsWith(u8, data, csv.utf8_bom)) {
+        data = data[csv.utf8_bom.len..];
+    }
 
     if (data.len == 0) return tokens.toOwnedSlice(gpa);
 
@@ -384,6 +404,8 @@ test "every target runs over a small corpus" {
         "\"unclosed",
         "1,,3\r\n\r\n",
         "a\rb\r\nc",
+        "\xef\xbb\xbfa,b\r\n",
+        "\xef\xbb\xbf",
     };
 
     for (targets) |target| {
@@ -391,7 +413,7 @@ test "every target runs over a small corpus" {
             for (0..col_seps.len) |col| {
                 for (0..row_sep_choices) |row| {
                     var buf: [max_input + 64]u8 = undefined;
-                    const input = writeInput(&buf, payload, @intCast(col), @intCast(row), 5);
+                    const input = writeInput(&buf, payload, @intCast(col), @intCast(row), 5, 1);
                     var smith: Smith = .{ .in = input };
                     try target.run(&smith);
                 }
@@ -402,15 +424,15 @@ test "every target runs over a small corpus" {
 
 /// Lay out the bytes `readParams` expects: a 4-byte little-endian length and
 /// the payload, then one 8-byte little-endian value per question asked.
-pub fn writeInput(buf: []u8, payload: []const u8, col: u8, row: u8, shift: u8) []const u8 {
+pub fn writeInput(buf: []u8, payload: []const u8, col: u8, row: u8, shift: u8, skip_bom: u8) []const u8 {
     std.debug.assert(payload.len <= max_input);
-    std.debug.assert(buf.len >= 4 + payload.len + 3 * 8);
+    std.debug.assert(buf.len >= 4 + payload.len + 4 * 8);
 
     std.mem.writeInt(u32, buf[0..4], @intCast(payload.len), .little);
     @memcpy(buf[4..][0..payload.len], payload);
 
     var at: usize = 4 + payload.len;
-    for ([_]u64{ col, row, shift }) |value| {
+    for ([_]u64{ col, row, shift, skip_bom }) |value| {
         std.mem.writeInt(u64, buf[at..][0..8], value, .little);
         at += 8;
     }

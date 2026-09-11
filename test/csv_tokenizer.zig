@@ -404,6 +404,39 @@ test "An unclosed quote is bounded by the buffer, not the input" {
     try testing.expectError(csv_mod.CsvError.ShortBuffer, csv.next());
 }
 
+test "A UTF-8 byte order mark is skipped by default" {
+    try expectStream("\xef\xbb\xbfName,Age\r\nx,1\r\n", .{}, 64, &.{ "Name", "Age", null, "x", "1", null });
+
+    // Only at the very beginning, and only once.
+    try expectStream("a,\xef\xbb\xbfb\r\n", .{}, 64, &.{ "a", "\xef\xbb\xbfb", null });
+    try expectStream("\xef\xbb\xbf\xef\xbb\xbfa\r\n", .{}, 64, &.{ "\xef\xbb\xbfa", null });
+
+    // A file holding nothing but a mark holds no records.
+    try expectStream("\xef\xbb\xbf", .{}, 64, &.{});
+
+    // Bytes that only start like a mark are field data.
+    try expectStream("\xef\xbbX,y\r\n", .{}, 64, &.{ "\xef\xbbX", "y", null });
+}
+
+test "Skipping the byte order mark can be turned off" {
+    try expectStream(
+        "\xef\xbb\xbfName,Age\r\n",
+        .{ .skip_bom = false },
+        64,
+        &.{ "\xef\xbb\xbfName", "Age", null },
+    );
+}
+
+test "A byte order mark split across a buffer refill" {
+    // The mark has to be recognized even when it does not arrive at once.
+    inline for (.{ 4, 5, 6, 8, 16, 64 }) |buffer_len| {
+        expectStream("\xef\xbb\xbfab,cd\r\n", .{}, buffer_len, &.{ "ab", "cd", null }) catch |err| {
+            std.log.warn("failed with buffer_len={d}\n", .{buffer_len});
+            return err;
+        };
+    }
+}
+
 test "Strict CRLF: only the pair terminates a record" {
     const strict: csv_mod.CsvConfig = .{ .row_sep = .crlf };
 

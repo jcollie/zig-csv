@@ -42,11 +42,14 @@ const corpus = [_][]const u8{
     "\"\"\"\"\"\"\n",
     "a\rb\r\nc",
     "x;y|z\tw\n",
+    "\xef\xbb\xbfa,b\r\n",
+    "\xef\xbb\xbf\"q\",r\n",
+    "\xef\xbb\xbf",
 };
 
 /// Bytes a mutation is likely to reach for: the CSV metacharacters, plus a
 /// couple of ordinary ones so inputs are not entirely punctuation.
-const interesting = [_]u8{ ',', '"', '\r', '\n', ';', '\t', '|', 'a', 'b', '0', 0 };
+const interesting = [_]u8{ ',', '"', '\r', '\n', ';', '\t', '|', 'a', 'b', '0', 0, 0xef, 0xbb, 0xbf };
 
 const Stats = struct {
     iterations: u64 = 0,
@@ -109,7 +112,8 @@ pub fn main(init: std.process.Init.Minimal) !void {
         const shift = fuzz.min_buffer_shift +
             random.uintLessThan(u8, fuzz.max_buffer_shift - fuzz.min_buffer_shift + 1);
 
-        const input = fuzz.writeInput(&input_buf, payload[0..len], col, row, shift);
+        const skip_bom = random.uintLessThan(u8, 2);
+        const input = fuzz.writeInput(&input_buf, payload[0..len], col, row, shift, skip_bom);
 
         stats.iterations += 1;
         stats.payload_bytes += len;
