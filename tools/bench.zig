@@ -45,6 +45,8 @@ pub fn main(init: std.process.Init) !void {
     var buffer_len: usize = 64 * 1024;
     var only: ?[]const u8 = null;
     var rows: usize = 20_000;
+    var col_sep: u8 = ',';
+    var quote: u8 = '"';
 
     var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
     defer args.deinit();
@@ -56,6 +58,10 @@ pub fn main(init: std.process.Init) !void {
             buffer_len = try std.fmt.parseInt(usize, args.next() orelse return error.MissingValue, 10);
         } else if (std.mem.eql(u8, arg, "--rows")) {
             rows = try std.fmt.parseInt(usize, args.next() orelse return error.MissingValue, 10);
+        } else if (std.mem.eql(u8, arg, "--col-sep")) {
+            col_sep = (args.next() orelse return error.MissingValue)[0];
+        } else if (std.mem.eql(u8, arg, "--quote")) {
+            quote = (args.next() orelse return error.MissingValue)[0];
         } else if (std.mem.eql(u8, arg, "--case")) {
             only = args.next() orelse return error.MissingValue;
         } else {
@@ -63,6 +69,13 @@ pub fn main(init: std.process.Init) !void {
             std.process.exit(2);
         }
     }
+
+    // Built from parsed arguments so the optimizer cannot see through it.
+    const config: csv.CsvConfig = .{
+        .col_sep = col_sep,
+        .row_sep = .any,
+        .quote = quote,
+    };
 
     std.debug.print("buffer {d} bytes, {d:.1}s per case\n\n", .{ buffer_len, seconds });
     std.debug.print("{s:<16} {s:>10} {s:>12} {s:>10} {s:>9}  {s}\n", .{
@@ -81,14 +94,14 @@ pub fn main(init: std.process.Init) !void {
         defer gpa.free(buffer);
 
         // One pass first, both to warm the caches and to count the fields.
-        const fields = try run(data, buffer);
+        const fields = try run(data, buffer, config);
 
         const budget: i96 = @intFromFloat(seconds * std.time.ns_per_s);
         const started = std.Io.Timestamp.now(io, .awake).nanoseconds;
         var passes: u64 = 0;
         var elapsed: i96 = 0;
         while (elapsed < budget) : (passes += 1) {
-            _ = try run(data, buffer);
+            _ = try run(data, buffer, config);
             elapsed = std.Io.Timestamp.now(io, .awake).nanoseconds - started;
         }
 
@@ -105,9 +118,14 @@ pub fn main(init: std.process.Init) !void {
 
 /// Tokenize the whole input, returning how many fields came out. The token
 /// is consumed so the loop cannot be optimized away.
-fn run(data: []const u8, buffer: []u8) !usize {
+///
+/// The configuration is a parameter rather than a literal on purpose. Written
+/// as `.{}` here it is comptime-known, and the optimizer folds it right
+/// through `init` into the scan -- which measures constant folding rather
+/// than the tokenizer a real caller gets.
+fn run(data: []const u8, buffer: []u8, config: csv.CsvConfig) !usize {
     var reader: std.Io.Reader = .fixed(data);
-    var tokenizer = try csv.CsvTokenizer.init(&reader, buffer, .{});
+    var tokenizer = try csv.CsvTokenizer.init(&reader, buffer, config);
 
     var fields: usize = 0;
     while (try tokenizer.next()) |token| {
@@ -205,7 +223,7 @@ test "every case generates parseable data" {
     for (cases) |case| {
         const data = try case.generate(gpa, 8);
         defer gpa.free(data);
-        const fields = try run(data, &buffer);
+        const fields = try run(data, &buffer, .{});
         try std.testing.expect(fields > 0);
     }
 }
