@@ -120,7 +120,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         var smith: Smith = .{ .in = input };
         target.run(&smith) catch |err| {
             switch (err) {
-                error.ShortBuffer, error.MisplacedQuote, error.NoSeparatorAfterField => {
+                error.ShortBuffer, error.MisplacedQuote, error.NoSeparatorAfterField, error.UnclosedQuote => {
                     stats.expected_errors += 1;
                     continue;
                 },

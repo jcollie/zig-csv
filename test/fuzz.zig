@@ -182,7 +182,7 @@ fn tokenize(smith: *Smith) anyerror!void {
     const p = readParams(smith, &in);
 
     const tokens = collect(backing, p.data, p.config, p.buffer_len) catch |err| switch (err) {
-        error.ShortBuffer, error.MisplacedQuote, error.NoSeparatorAfterField => return,
+        error.ShortBuffer, error.MisplacedQuote, error.NoSeparatorAfterField, error.UnclosedQuote => return,
         else => return err,
     };
     freeTokens(backing, tokens);

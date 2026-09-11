@@ -18,9 +18,17 @@ pub const CsvToken = union(CsvTokenType) {
 };
 
 pub const CsvError = error{
+    /// A field did not fit in the buffer it was being assembled in.
     ShortBuffer,
+    /// A quote appeared inside a field that was not itself quoted.
     MisplacedQuote,
+    /// Something other than a separator or a record terminator followed a
+    /// quoted field.
     NoSeparatorAfterField,
+    /// The input ended while a quoted field was still open. Distinct from
+    /// `ShortBuffer`: enlarging the buffer will not help, because there is no
+    /// closing quote anywhere in the input.
+    UnclosedQuote,
 };
 
 /// How records are terminated.
@@ -520,15 +528,18 @@ pub const CsvTokenizer = struct {
                 // rather than give up -- that is what lets an input end on a
                 // quoted field with no terminator after it.
                 if (!has_data and !self.reader.all_read) {
+                    // The buffer filled up and no closing quote was in it.
                     return CsvError.ShortBuffer;
                 }
 
                 quoted_field = try self.reader.untilClosingQuote(self.config.quote);
                 if (quoted_field == null and !has_data) {
-                    // Nothing more was read and the field still has no
-                    // closing quote: it is unclosed, or longer than the
-                    // buffer.
-                    return CsvError.ShortBuffer;
+                    // Nothing more was read and there is still no closing
+                    // quote, so there is none to come: the field is open at
+                    // the end of the input. A bigger buffer would not help,
+                    // and saying `ShortBuffer` here would send the caller to
+                    // find one.
+                    return CsvError.UnclosedQuote;
                 }
             }
 

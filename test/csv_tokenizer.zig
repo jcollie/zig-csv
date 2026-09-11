@@ -364,6 +364,43 @@ test "An unclosed quoted field is an error" {
     var csv = try getTokenizer(&reader, &buffer, .{});
 
     try expectToken(csv_mod.CsvToken{ .field = "1" }, try csv.next());
+    try testing.expectError(csv_mod.CsvError.UnclosedQuote, csv.next());
+}
+
+test "An unclosed quote is told apart from a short buffer" {
+    // The input ends with the field still open, and the buffer has room to
+    // spare. Reporting ShortBuffer here would send the caller looking for a
+    // bigger buffer that cannot help.
+    {
+        var reader = std.Io.Reader.fixed("\"oops,a\r\nb,c\r\n");
+        var buffer: [256]u8 = undefined;
+        var csv = try getTokenizer(&reader, &buffer, .{});
+        try testing.expectError(csv_mod.CsvError.UnclosedQuote, csv.next());
+    }
+
+    // Here the quote does close, but not before the buffer fills.
+    {
+        var reader = std.Io.Reader.fixed("\"aaaaaaaaaaaaaaaaaaaa\"\r\n");
+        var buffer: [8]u8 = undefined;
+        var csv = try getTokenizer(&reader, &buffer, .{});
+        try testing.expectError(csv_mod.CsvError.ShortBuffer, csv.next());
+    }
+}
+
+test "An unclosed quote is bounded by the buffer, not the input" {
+    // A single unclosed quote must not swallow the rest of the file, however
+    // much of it there is.
+    const gpa = testing.allocator;
+
+    var input: std.ArrayList(u8) = .empty;
+    defer input.deinit(gpa);
+    try input.appendSlice(gpa, "\"oops");
+    for (0..20000) |i| try input.print(gpa, "row{d},a,b\r\n", .{i});
+
+    var reader = std.Io.Reader.fixed(input.items);
+    var buffer: [1024]u8 = undefined;
+    var csv = try getTokenizer(&reader, &buffer, .{});
+
     try testing.expectError(csv_mod.CsvError.ShortBuffer, csv.next());
 }
 

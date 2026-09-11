@@ -172,7 +172,7 @@ quoted field may span lines.
 | `CsvToken` | Tagged union: `.field: []const u8` or `.row_end`. |
 | `CsvConfig` | `col_sep` (default `,`), `row_sep` (default `.any`), `quote` (default `"`). |
 | `RowSeparator` | `.any` to accept CR, LF or CRLF, `.crlf` to require the pair, or `.{ .byte = c }` to require one byte. |
-| `CsvError` | `ShortBuffer`, `MisplacedQuote`, `NoSeparatorAfterField`. |
+| `CsvError` | `ShortBuffer`, `MisplacedQuote`, `NoSeparatorAfterField`, `UnclosedQuote`. |
 
 A `field` slice points into the caller's buffer and is only valid until the
 next call to `next()`. Copy it if you need to keep it.
@@ -195,8 +195,27 @@ next call to `next()`. Copy it if you need to keep it.
   last record as usual, so a file with no trailing newline reads the same as
   one with it. A record ending in a column separator keeps its trailing empty
   field, so `a,` is two fields exactly as `a,\n` is.
-- An unclosed quoted field is an error (`error.ShortBuffer`), as is a field
-  longer than the buffer.
+- An unclosed quoted field and a field longer than the buffer are different
+  errors. `error.UnclosedQuote` means the input ended with a field still open,
+  so a larger buffer would not help; `error.ShortBuffer` means the buffer
+  filled before the field ended, so it would.
+
+## An unclosed quote cannot run away
+
+A quote that is never closed is the classic way to lose a CSV file: a parser
+that buffers a record at a time will keep reading, and one stray quote can
+swallow everything after it.
+
+That cannot happen here, and not by being careful about it -- the tokenizer
+does not allocate, so a field is bounded by the buffer it is being assembled
+in, and a field that outgrows the buffer is an error rather than a larger
+allocation. A 2.2 MB file with a single unclosed quote on its first line stops
+at once, having produced no fields, whether the buffer is 1 KB or 64 KB.
+
+Which error comes back says what to do about it. `error.UnclosedQuote` means
+the input ran out with the field still open: the file is malformed and a
+bigger buffer will not change that. `error.ShortBuffer` means the buffer
+filled first, which a bigger one may well fix.
 
 ## RFC 4180
 
