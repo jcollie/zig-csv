@@ -204,6 +204,25 @@ zig build
 
 CI runs on Forgejo Actions; see `.forgejo/workflows/test.yml`.
 
+There is a fuzzing loop and a set of throughput benchmarks:
+
+```console
+zig build fuzz -- --iterations 100000 --seed 1
+```
+
+```console
+zig build bench -- --seconds 2
+```
+
+Zig 0.16.0 cannot build a test executable in fuzz mode, so `tools/fuzz.zig`
+drives the targets in `test/fuzz.zig` itself, mutating a corpus of real CSV.
+Besides checking that nothing crashes, the targets assert that the field
+buffer cannot change what is parsed, that a token stream survives being
+re-encoded and read back, and that the streaming tokenizer agrees with a
+naive reference parser that sees the whole input at once. The targets also
+run over a fixed corpus as part of `zig build test`, so they cannot rot
+between fuzzing sessions.
+
 Some notes on throughput and how to generate test data are in
 [`docs/performance.md`](docs/performance.md).
 
