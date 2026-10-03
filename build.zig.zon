@@ -1,7 +1,7 @@
 .{
-    .name = .zig_csv,
+    .name = .csv,
     .version = "0.3.0",
-    .fingerprint = 0xb51631650614d5d2,
+    .fingerprint = 0x8a452570614d5d2,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{},
     .paths = .{

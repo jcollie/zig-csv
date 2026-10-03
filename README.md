@@ -48,14 +48,14 @@ zig fetch --save git+https://git.jcollie.dev/jeff/zig-csv.git#v0.3.0
 ```
 
 That records the resolved commit and hash in your `build.zig.zon` under the
-name `zig_csv`. Naming a tag pins the release; leaving the `#v0.3.0` off
+name `csv`. Naming a tag pins the release; leaving the `#v0.3.0` off
 pins whatever `main` happened to point at when you ran the command, which is
 rarely what you want in a committed manifest.
 
 Then wire the module up in your `build.zig`:
 
 ```zig
-const csv_dep = b.dependency("zig_csv", .{
+const csv_dep = b.dependency("csv", .{
     .target = target,
     .optimize = optimize,
 });
