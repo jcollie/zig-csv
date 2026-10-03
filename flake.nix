@@ -7,12 +7,19 @@
 
   inputs = {
     nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.zst";
+    # The toolchain is the official 0.17.0 release binary, packaged by the
+    # overlay, rather than nixpkgs' Zig.
+    zig = {
+      url = "git+https://git.jcollie.dev/jeff/zig-overlay.git";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
     {
       self,
       nixpkgs,
+      zig,
       ...
     }:
     let
@@ -29,7 +36,7 @@
         default = pkgs.mkShell {
           nativeBuildInputs = [
             pkgs.reuse
-            pkgs.zig_0_16
+            zig.packages.${pkgs.stdenv.hostPlatform.system}."0.17.0"
           ];
         };
       });

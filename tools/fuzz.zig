@@ -3,10 +3,8 @@
 
 //! A fuzzing loop for the CSV tokenizer.
 //!
-//! Zig 0.16.0 cannot build a test executable in fuzz mode, and even patched it
-//! populates no coverage table, so this drives the targets in `test/fuzz.zig`
-//! itself: it mutates a corpus of real CSV inputs, hands each result to a
-//! target, and reports what came back.
+//! This drives the targets in `test/fuzz.zig` itself: it mutates a corpus of
+//! real CSV inputs, hands each result to a target, and reports what came back.
 //!
 //! Usage: fuzz [--iterations N] [--seed N] [--target NAME]
 

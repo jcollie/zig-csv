@@ -14,7 +14,7 @@ fn getTokenizer(reader: *std.Io.Reader, buffer: []u8, config: csv_mod.CsvConfig)
 
 fn expectToken(comptime expected: csv_mod.CsvToken, maybe_actual: ?csv_mod.CsvToken) !void {
     if (maybe_actual) |actual| {
-        if (@intFromEnum(expected) != @intFromEnum(actual)) {
+        if (@backingInt(expected) != @backingInt(actual)) {
             std.log.warn("Expected {t} but is {t}\n", .{ expected, actual });
             return error.TestFailed;
         }

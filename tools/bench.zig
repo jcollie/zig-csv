@@ -177,9 +177,9 @@ fn genWide(gpa: Allocator, rows: usize) ![]u8 {
 fn genLongFields(gpa: Allocator, rows: usize) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(gpa);
-    const filler = "x" ** 200;
+    const filler: [200]u8 = @splat('x');
     for (0..rows) |i| {
-        try out.print(gpa, "{d},{s},{s}\n", .{ i, filler, filler });
+        try out.print(gpa, "{d},{s},{s}\n", .{ i, &filler, &filler });
     }
     return out.toOwnedSlice(gpa);
 }

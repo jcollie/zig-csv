@@ -26,8 +26,18 @@ git clone https://github.com/jcollie/zig-csv.git
 
 ## Requirements
 
-Zig 0.16.0 or later. The 0.16 release reworked readers and writers, so earlier
-versions will not build this.
+Zig 0.17.0 for `main`. The development shell takes the official release
+binary from [zig-overlay](https://git.jcollie.dev/jeff/zig-overlay).
+
+For Zig 0.16.0, use the `v0.2.1` tag or the `zig-0.16` branch, which hold the
+last of zig-csv to build with it:
+
+```console
+zig fetch --save git+https://git.jcollie.dev/jeff/zig-csv.git#zig-0.16
+```
+
+The 0.16 release reworked readers and writers, so nothing earlier builds
+either line.
 
 ## Installation
 
@@ -38,7 +48,7 @@ zig fetch --save git+https://git.jcollie.dev/jeff/zig-csv.git#v0.2.1
 ```
 
 That records the resolved commit and hash in your `build.zig.zon` under the
-name `zig_csv`. Naming a tag pins the release; leaving the `#v0.1.0` off
+name `zig_csv`. Naming a tag pins the release; leaving the `#v0.2.1` off
 pins whatever `main` happened to point at when you ran the command, which is
 rarely what you want in a committed manifest.
 
@@ -97,7 +107,7 @@ tokenizer, and that the trailing empty field is reported as a zero-length
 ### Reading from a file
 
 The tokenizer only wants a `*std.Io.Reader`, so a file reader is the same code
-with a different source. In 0.16 file access goes through an `Io`:
+with a different source. File access goes through an `Io`:
 
 ```zig
 var threaded: std.Io.Threaded = .init(gpa, .{});
@@ -298,8 +308,8 @@ zig build fuzz -- --iterations 100000 --seed 1
 zig build bench -- --seconds 2
 ```
 
-Zig 0.16.0 cannot build a test executable in fuzz mode, so `tools/fuzz.zig`
-drives the targets in `test/fuzz.zig` itself, mutating a corpus of real CSV.
+`tools/fuzz.zig` drives the targets in `test/fuzz.zig` itself, mutating a
+corpus of real CSV.
 Besides checking that nothing crashes, the targets assert that the field
 buffer cannot change what is parsed, that a token stream survives being
 re-encoded and read back, that the streaming tokenizer agrees with a naive
@@ -341,7 +351,7 @@ Original author: [beho](https://github.com/beho), whose repository at
 tokenizer design and the test suite are theirs. Later upstream contributions
 came from Roman Frołow, Nitin Prakash, xdBronch, and Deins.
 
-This fork carries the library forward across Zig releases — currently 0.16 —
+This fork carries the library forward across Zig releases — currently 0.17 —
 and adds the Nix flake, the Forgejo workflow, and REUSE licensing metadata.
 
 ## License

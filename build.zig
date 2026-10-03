@@ -58,7 +58,7 @@ pub fn build(b: *std.Build) void {
     fuzz_driver.root_module.addImport("fuzz", fuzz_module);
 
     const run_fuzz = b.addRunArtifact(fuzz_driver);
-    if (b.args) |args| run_fuzz.addArgs(args);
+    run_fuzz.addPassthruArgs();
     run_fuzz.stdio = .inherit;
 
     const fuzz_step = b.step("fuzz", "Run the fuzzing loop (-- --iterations N --seed N --target NAME)");
@@ -80,7 +80,7 @@ pub fn build(b: *std.Build) void {
     const bench = b.addExecutable(.{ .name = "bench", .root_module = bench_module });
 
     const run_bench = b.addRunArtifact(bench);
-    if (b.args) |args| run_bench.addArgs(args);
+    run_bench.addPassthruArgs();
     run_bench.stdio = .inherit;
 
     const bench_step = b.step("bench", "Run the throughput benchmarks (-- --seconds N --buffer N --case NAME)");
