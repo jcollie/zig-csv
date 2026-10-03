@@ -44,7 +44,17 @@ pub fn build(b: *std.Build) void {
 
     // Runs the targets over a fixed corpus, so that they cannot rot between
     // fuzzing sessions.
-    const fuzz_tests = b.addTest(.{ .name = "fuzz-tests", .root_module = fuzz_module });
+    //
+    // They are also what `zig build test --fuzz` explores. That needs the test
+    // binary compiled by LLVM: Debug otherwise gets the self-hosted backend,
+    // which emits no table of program counters, so the fuzzer has no coverage
+    // to steer by -- a bounded run ends with "pcs_len was zero" and an
+    // unbounded one panics in the build runner.
+    const fuzz_tests = b.addTest(.{
+        .name = "fuzz-tests",
+        .root_module = fuzz_module,
+        .use_llvm = true,
+    });
     test_step.dependOn(&b.addRunArtifact(fuzz_tests).step);
 
     const fuzz_driver = b.addExecutable(.{

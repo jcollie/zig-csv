@@ -298,7 +298,28 @@ zig build
 
 CI runs on Forgejo Actions; see `.forgejo/workflows/test.yml`.
 
-There is a fuzzing loop and a set of throughput benchmarks:
+The fuzz targets in `test/fuzz.zig` run under Zig's built-in fuzzer:
+
+```console
+zig build test --fuzz          # until interrupted, with a web interface
+zig build test --fuzz=1M       # a bounded run, then a report
+```
+
+Besides checking that nothing crashes, the targets assert that the field
+buffer cannot change what is parsed, that a token stream survives being
+re-encoded and read back, that the streaming tokenizer agrees with a naive
+reference parser that sees the whole input at once, and that every document
+the RFC's grammar admits parses back into the fields that built it.
+
+The bounded report has one entry for the whole test binary, labeled with the
+name of its first fuzz test; every target in it was fuzzed and shares that
+coverage figure. A finding prints `input saved to '.zig-cache/f/crash'` above
+the report. Without `--fuzz`, `zig build test` runs every target over a fixed
+corpus, so they cannot rot between fuzzing sessions.
+
+There is also a standalone fuzzing loop, which needs no coverage
+instrumentation and reports how many inputs each target accepted, rejected
+and generated, and a set of throughput benchmarks:
 
 ```console
 zig build fuzz -- --iterations 100000 --seed 1
@@ -307,16 +328,6 @@ zig build fuzz -- --iterations 100000 --seed 1
 ```console
 zig build bench -- --seconds 2
 ```
-
-`tools/fuzz.zig` drives the targets in `test/fuzz.zig` itself, mutating a
-corpus of real CSV.
-Besides checking that nothing crashes, the targets assert that the field
-buffer cannot change what is parsed, that a token stream survives being
-re-encoded and read back, that the streaming tokenizer agrees with a naive
-reference parser that sees the whole input at once, and that every document
-the RFC's grammar admits parses back into the fields that built it. The targets also
-run over a fixed corpus as part of `zig build test`, so they cannot rot
-between fuzzing sessions.
 
 Some notes on throughput and how to generate test data are in
 [`docs/performance.md`](docs/performance.md).

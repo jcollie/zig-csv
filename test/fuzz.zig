@@ -554,22 +554,69 @@ pub const targets = [_]Target{
     .{ .name = "rfc4180", .run = rfc4180 },
 };
 
-test "every target runs over a small corpus" {
-    const corpus = [_][]const u8{
-        "",
-        "\n",
-        "a",
-        "a,b\r\nc,d\r\n",
-        "\"a\"\"b\",c\n",
-        "\"unclosed",
-        "1,,3\r\n\r\n",
-        "a\rb\r\nc",
-        "\xef\xbb\xbfa,b\r\n",
-        "\xef\xbb\xbf",
-    };
+/// Payloads every target starts from: under `zig build test` the regression
+/// test below runs each one in every configuration, and under `zig build test
+/// --fuzz` they seed the fuzzer.
+const payloads = [_][]const u8{
+    "",
+    "\n",
+    "a",
+    "a,b\r\nc,d\r\n",
+    "\"a\"\"b\",c\n",
+    "\"unclosed",
+    "1,,3\r\n\r\n",
+    "a\rb\r\nc",
+    "\xef\xbb\xbfa,b\r\n",
+    "\xef\xbb\xbf",
+};
 
+/// The payloads laid out as fuzzer inputs, once per row separator choice and
+/// with a mid-sized buffer. Only the comma is used as the column separator,
+/// because that is what every payload is written with.
+const seeds = seeds: {
+    var list: [payloads.len * row_sep_choices][]const u8 = undefined;
+    for (payloads, 0..) |payload, i| {
+        for (0..row_sep_choices) |row| {
+            var buf: [4 + payload.len + 4 * 8]u8 = undefined;
+            const input = writeInput(&buf, payload, 0, row, 5, 1);
+            const final = input[0..input.len].*;
+            list[i * row_sep_choices + row] = &final;
+        }
+    }
+    const final = list;
+    break :seeds final;
+};
+
+fn fuzzTarget(target: *const Target, smith: *Smith) anyerror!void {
+    return target.run(smith);
+}
+
+// One fuzz test per target, so that `zig build test --fuzz` explores each of
+// them. Without `--fuzz` each runs once over the seeds and once over the empty
+// input.
+test "fuzz tokenize" {
+    try std.testing.fuzz(&targets[0], fuzzTarget, .{ .corpus = &seeds });
+}
+
+test "fuzz buffer-invariance" {
+    try std.testing.fuzz(&targets[1], fuzzTarget, .{ .corpus = &seeds });
+}
+
+test "fuzz round-trip" {
+    try std.testing.fuzz(&targets[2], fuzzTarget, .{ .corpus = &seeds });
+}
+
+test "fuzz differential" {
+    try std.testing.fuzz(&targets[3], fuzzTarget, .{ .corpus = &seeds });
+}
+
+test "fuzz rfc4180" {
+    try std.testing.fuzz(&targets[4], fuzzTarget, .{ .corpus = &seeds });
+}
+
+test "every target runs over a small corpus" {
     for (targets) |target| {
-        for (corpus) |payload| {
+        for (payloads) |payload| {
             for (0..col_seps.len) |col| {
                 for (0..row_sep_choices) |row| {
                     var buf: [max_input + 64]u8 = undefined;

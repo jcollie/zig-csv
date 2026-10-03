@@ -3,8 +3,11 @@
 
 //! A fuzzing loop for the CSV tokenizer.
 //!
-//! This drives the targets in `test/fuzz.zig` itself: it mutates a corpus of
-//! real CSV inputs, hands each result to a target, and reports what came back.
+//! `zig build test --fuzz` is the coverage-guided way to fuzz these targets.
+//! This drives the targets in `test/fuzz.zig` itself instead: it mutates a
+//! corpus of real CSV inputs, hands each result to a target, and reports what
+//! came back, including how many inputs each target accepted and rejected --
+//! which the built-in fuzzer does not show.
 //!
 //! Usage: fuzz [--iterations N] [--seed N] [--target NAME]
 
