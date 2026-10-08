@@ -26,6 +26,13 @@ git clone https://github.com/jcollie/zig-csv.git
 
 The Tangled mirror is at <https://tangled.org/jcollie.dev/zig-csv>.
 
+It is also on [Radicle](https://radicle.xyz/) as
+`rad:z3iDKwRWK8LUdXuU3gkGEYpnddDym`:
+
+```console
+rad clone rad:z3iDKwRWK8LUdXuU3gkGEYpnddDym
+```
+
 ## Requirements
 
 Zig 0.17.0 for `main`. The development shell takes the official release
