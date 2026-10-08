@@ -14,7 +14,7 @@ building against current Zig releases; see [Credits](#credits).
 
 ## Where this lives
 
-The canonical repository is on Forgejo, with a mirror on GitHub:
+The canonical repository is on Forgejo, with mirrors on GitHub and Tangled:
 
 ```console
 git clone https://git.jcollie.dev/jeff/zig-csv.git
@@ -23,6 +23,8 @@ git clone https://git.jcollie.dev/jeff/zig-csv.git
 ```console
 git clone https://github.com/jcollie/zig-csv.git
 ```
+
+The Tangled mirror is at <https://tangled.org/jcollie.dev/zig-csv>.
 
 ## Requirements
 
